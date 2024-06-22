@@ -28,6 +28,7 @@ import Data.Functor ((<$>))
 import Data.Int (Int)
 import Data.List (filter, reverse, sortBy, zip)
 import qualified Data.List.NonEmpty as NE
+import Data.List.Split (chunksOf)
 import qualified Data.Map as Map
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, isJust, isNothing, mapMaybe, maybe)
 import Data.Monoid (Monoid (mempty))
@@ -127,7 +128,7 @@ htmlSkeleton page content = do
       L.link_ [L.href_ "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css", L.rel_ "stylesheet"]
       L.link_ [L.href_ "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css", L.rel_ "stylesheet"]
     L.body_ $ do
-      headerHtml page
+      viewHeader page
       L.div_ [L.class_ "container"] do
         L.main_ do
           content
@@ -214,7 +215,7 @@ currentWorkoutHtml database =
       currentExercises -> do
         L.h1_ do
           iconHtml "joystick"
-          L.span_ "Current Workout"
+          L.span_ "Current"
         let musclesInvolved = currentExercises >>= (NE.toList . (.muscles) . (.exercise))
             musclesMissing = Set.toList $ Set.fromList allMuscles `Set.difference` Set.fromList musclesInvolved
         L.div_ [L.class_ "gap-1 mb-3"] do
@@ -283,16 +284,28 @@ inCurrentTraining :: Database -> Muscle -> Bool
 inCurrentTraining db muscle =
   isJust (find (\ewi -> muscle `elem` ewi.exercise.muscles) db.currentTraining)
 
-trainingHtml :: UTCTime -> Database -> Category -> L.Html ()
-trainingHtml currentTime database category' = do
-  L.h1_ do
-    iconHtml "hand-thumbs-up"
-    L.span_ "Exercise list"
-  L.div_ [L.class_ "text-bg-light p-2"] do
-    L.ul_ $ forM_ allMuscles \muscle' -> do
-      L.li_ $ L.a_ [L.href_ ("#training-section-" <> packShow muscle')] $ do
-        L.span_ $ L.toHtml (packShow muscle')
-        unless (inCurrentTraining database muscle') (L.sup_ "*")
+viewExerciseListOverview :: Database -> L.Html ()
+viewExerciseListOverview database = do
+  let viewButtonClass muscle' =
+        if inCurrentTraining database muscle'
+          then "btn btn-secondary w-100"
+          else "btn btn-primary w-100"
+      viewButton :: Muscle -> L.Html ()
+      viewButton muscle' = do
+        L.a_ [L.href_ ("/training/" <> packShow muscle'), L.class_ (viewButtonClass muscle')] do
+          L.span_ $ L.toHtml (packShow muscle')
+      buttonArray :: [[Muscle]]
+      buttonArray = chunksOf 3 allMuscles
+  forM_ buttonArray \buttonList -> do
+    L.div_ [L.class_ "row mb-3"] (forM_ buttonList (\button -> L.div_ [L.class_ "col-4 text-center"] (viewButton button)))
+
+-- L.div_ [L.class_ "text-bg-light p-2"] do
+--   L.ul_ $ forM_ allMuscles \muscle' -> do
+--     L.li_ $ makeButton muscle'
+
+viewChoose :: UTCTime -> Database -> Category -> L.Html ()
+viewChoose currentTime database category' = do
+  viewExerciseListOverview database
   let exercisePool = filter (\e -> e.category == category') database.exercises
       exerciseWithIntensityTrainsMuscle :: Muscle -> ExerciseWithIntensity Exercise -> Bool
       exerciseWithIntensityTrainsMuscle muscle' e = muscle' `elem` e.exercise.muscles
@@ -570,12 +583,12 @@ data PageDescription = PageDescription
     description :: !Text
   }
 
-headerHtml :: CurrentPage -> L.Html ()
-headerHtml currentPage =
-  let exerciseLists = [PageDescription PageExerciseList "card-checklist" "Choose Exercises"]
+viewHeader :: CurrentPage -> L.Html ()
+viewHeader currentPage =
+  let exerciseLists = [PageDescription PageExerciseList "card-checklist" "Choose"]
       otherPages =
-        [ PageDescription PageCurrent "graph-down-arrow" "Current Workout",
-          PageDescription PageExercises "box2-heart" "Edit Exercises"
+        [ PageDescription PageCurrent "graph-down-arrow" "Current",
+          PageDescription PageExercises "box2-heart" "Edit"
         ]
       makeItem :: PageDescription -> L.Html ()
       makeItem pd =
@@ -589,7 +602,7 @@ headerHtml currentPage =
               iconHtml pd.icon
               L.toHtml pd.description
    in L.header_ [L.class_ "py-3"] do
-        L.div_ [L.class_ "d-flex justify-content-center align-items-center"] (L.ul_ [L.class_ "nav nav-pills"] (mapM_ makeItem (exerciseLists <> otherPages)))
+        L.div_ [L.class_ "d-flex justify-content-center align-items-center"] (L.ul_ [L.class_ "nav nav-tabs"] (mapM_ makeItem (exerciseLists <> otherPages)))
 
 getUploadedFileDir :: (MonadIO m) => m FilePath
 getUploadedFileDir = do
@@ -655,7 +668,7 @@ pageCurrentHtml currentTime db = htmlSkeleton PageCurrent $ do
     L.ul_ $ do
       L.li_ $ L.a_ [makeHref idCurrentWorkout] do
         iconHtml "joystick"
-        L.span_ "Current Workout"
+        L.span_ "Current"
       L.li_ $ L.a_ [makeHref idSoreness] do
         iconHtml "graph-down-arrow"
         L.span_ "Soreness"
@@ -788,8 +801,7 @@ main = scotty 3000 do
     db <- readDatabase
     currentTime <- liftIO getCurrentTime
     html $ renderText $ htmlSkeleton PageExerciseList $ do
-      L.hr_ [L.class_ "mb-3"]
-      trainingHtml currentTime db Strength
+      viewChoose currentTime db Strength
 
   get "/uploaded-files/:fn" do
     fileName <- pathParam "fn"
