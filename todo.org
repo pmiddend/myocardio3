@@ -124,11 +124,22 @@ CLOSED: [2024-06-22 Sat 07:46]
 :LOGBOOK:
 CLOCK: [2024-06-22 Sat 07:40]--[2024-06-22 Sat 07:46] =>  0:06
 :END:
-** TODO Reinstate CI
+** DONE Reinstate CI
+CLOSED: [2024-06-22 Sat 08:08]
 :LOGBOOK:
-CLOCK: [2024-06-22 Sat 07:59]
+CLOCK: [2024-06-22 Sat 07:59]--[2024-06-22 Sat 08:08] =>  0:09
 :END:
+** TODO Remove mobility/endurance concepts
+:LOGBOOK:
+CLOCK: [2024-06-22 Sat 08:08]
+:END:
+
+- Doesn't have to be removed from the data, but from the UI first.
 ** TODO Add "change intensity after adding to current"
+:LOGBOOK:
+CLOCK: [2024-06-22 Sat 08:08]--[2024-06-22 Sat 08:08] =>  0:00
+:END:
+** TODO Ability to remove exercises entirely
 ** TODO Better Nix deployment
 :LOGBOOK:
 CLOCK: [2024-03-30 Sat 08:15]--[2024-03-30 Sat 08:25] =>  0:10
@@ -136,8 +147,8 @@ CLOCK: [2024-03-30 Sat 08:15]--[2024-03-30 Sat 08:25] =>  0:10
 
 - Read Gabriella's post on nixos-rebuild switch
 - Try this
-** TODO Remove mobility/endurance concepts
 ** TODO Show soreness history per muscle group
+** TODO Put external css dependencies into Nix deployment as well
 ** TODO Add breakpoints in exercise choose and current exercises as well
 ** TODO Reinstate and distribute static build
 ** TODO Muscle information (what muscle is where and so on)

@@ -45,7 +45,7 @@ import Lucid (renderText)
 import qualified Lucid as L
 import Lucid.Base (makeAttributes)
 import MyocardioApp.Database
-  ( Category (Endurance, Mobility, Strength, Stretch),
+  ( Category (Strength),
     Database,
     DatabaseF (currentTraining, pastExercises, sorenessHistory),
     Exercise (Exercise, category, description, fileReferences, muscles, name),
@@ -552,14 +552,14 @@ exercisesHtml db existingExercise = do
 
 data CurrentPage
   = PageCurrent
-  | PageExerciseList !Category
+  | PageExerciseList
   | PageExercises
   deriving (Eq, Show, Read)
 
 pageToPath :: CurrentPage -> Text
 pageToPath PageCurrent = "/"
 pageToPath PageExercises = "/exercises"
-pageToPath (PageExerciseList category') = "/training/" <> packShow category'
+pageToPath PageExerciseList = "/training"
 
 instance Parsable CurrentPage where
   parseParam = readEither
@@ -572,15 +572,10 @@ data PageDescription = PageDescription
 
 headerHtml :: CurrentPage -> L.Html ()
 headerHtml currentPage =
-  let exerciseLists =
-        [ PageDescription (PageExerciseList Strength) "hammer" "Strength",
-          PageDescription (PageExerciseList Endurance) "person-walking" "Endurance",
-          PageDescription (PageExerciseList Stretch) "rulers" "Stretch",
-          PageDescription (PageExerciseList Mobility) "airplane" "Mobility"
-        ]
+  let exerciseLists = [PageDescription PageExerciseList "card-checklist" "Choose Exercises"]
       otherPages =
-        [ PageDescription PageCurrent "graph-down-arrow" "Current",
-          PageDescription PageExercises "box2-heart" "Exercises"
+        [ PageDescription PageCurrent "graph-down-arrow" "Current Workout",
+          PageDescription PageExercises "box2-heart" "Edit Exercises"
         ]
       makeItem :: PageDescription -> L.Html ()
       makeItem pd =
@@ -594,8 +589,7 @@ headerHtml currentPage =
               iconHtml pd.icon
               L.toHtml pd.description
    in L.header_ [L.class_ "py-3"] do
-        L.div_ [L.class_ "d-flex justify-content-center align-items-center"] (L.ul_ [L.class_ "nav nav-pills"] (mapM_ makeItem exerciseLists))
-        L.div_ [L.class_ "d-flex justify-content-center align-items-center"] (L.ul_ [L.class_ "nav nav-pills"] (mapM_ makeItem otherPages))
+        L.div_ [L.class_ "d-flex justify-content-center align-items-center"] (L.ul_ [L.class_ "nav nav-pills"] (mapM_ makeItem (exerciseLists <> otherPages)))
 
 getUploadedFileDir :: (MonadIO m) => m FilePath
 getUploadedFileDir = do
@@ -641,8 +635,8 @@ exerciseHistoryForCategoryHtml currentTime db category =
             Just lastTime' -> L.toHtml $ dayDiffText currentTime lastTime'
             Nothing -> "never trained!"
 
-exerciseHistoryHtml :: UTCTime -> Database -> Category -> L.Html ()
-exerciseHistoryHtml currentTime db category = do
+exerciseHistoryHtml :: UTCTime -> Database -> L.Html ()
+exerciseHistoryHtml currentTime db = do
   L.h1_ do
     iconHtml "clipboard-data-fill"
     L.span_ "Training state"
@@ -653,10 +647,10 @@ exerciseHistoryHtml currentTime db category = do
     L.div_ [L.class_ "col-6 text-center"] do
       L.h5_ "Posterior View"
       L.img_ [L.src_ "/muscles/back.svg", L.class_ "img-fluid"]
-  exerciseHistoryForCategoryHtml currentTime db category
+  exerciseHistoryForCategoryHtml currentTime db Strength
 
-pageCurrentHtml :: UTCTime -> Database -> Category -> L.Html ()
-pageCurrentHtml currentTime db category = htmlSkeleton PageCurrent $ do
+pageCurrentHtml :: UTCTime -> Database -> L.Html ()
+pageCurrentHtml currentTime db = htmlSkeleton PageCurrent $ do
   L.div_ [L.class_ "text-bg-light p-2"] do
     L.ul_ $ do
       L.li_ $ L.a_ [makeHref idCurrentWorkout] do
@@ -672,14 +666,7 @@ pageCurrentHtml currentTime db category = htmlSkeleton PageCurrent $ do
   L.hr_ [L.class_ "mb-3"]
   sorenessInputAndOutput db
   L.hr_ [L.class_ "mb-3"]
-  L.div_ [L.class_ "btn-group mb-3", makeId idExerciseHistory] $ forM_ allCategories \category' ->
-    L.a_
-      [ L.href_ ("/?history-tab=" <> packShow category'),
-        L.class_ "btn",
-        if category == category' then L.class_ "active" else mempty
-      ]
-      (L.toHtml $ packShow category')
-  exerciseHistoryHtml currentTime db category
+  exerciseHistoryHtml currentTime db
 
 -- This path is changed by the Nix build to point to $out
 staticBasePath :: FilePath
@@ -722,8 +709,7 @@ main = scotty 3000 do
   get "/" do
     db <- readDatabase
     currentTime <- liftIO getCurrentTime
-    historyTab <- queryParamMaybe "history-tab"
-    html $ renderText $ pageCurrentHtml currentTime db (fromMaybe Strength historyTab)
+    html $ renderText $ pageCurrentHtml currentTime db
 
   get (regex "/muscles/([^\\.]*).svg") do
     db <- readDatabase
@@ -798,13 +784,12 @@ main = scotty 3000 do
                     db
                     (Just exerciseFound)
 
-  get (capture "/training/:training-type") do
+  get (capture "/training") do
     db <- readDatabase
     currentTime <- liftIO getCurrentTime
-    trainingType <- pathParam "training-type"
-    html $ renderText $ htmlSkeleton (PageExerciseList trainingType) $ do
+    html $ renderText $ htmlSkeleton PageExerciseList $ do
       L.hr_ [L.class_ "mb-3"]
-      trainingHtml currentTime db trainingType
+      trainingHtml currentTime db Strength
 
   get "/uploaded-files/:fn" do
     fileName <- pathParam "fn"
