@@ -124,6 +124,10 @@ CLOSED: [2024-06-22 Sat 07:46]
 :LOGBOOK:
 CLOCK: [2024-06-22 Sat 07:40]--[2024-06-22 Sat 07:46] =>  0:06
 :END:
+** TODO Reinstate CI
+:LOGBOOK:
+CLOCK: [2024-06-22 Sat 07:59]
+:END:
 ** TODO Add "change intensity after adding to current"
 ** TODO Better Nix deployment
 :LOGBOOK:
@@ -135,6 +139,7 @@ CLOCK: [2024-03-30 Sat 08:15]--[2024-03-30 Sat 08:25] =>  0:10
 ** TODO Remove mobility/endurance concepts
 ** TODO Show soreness history per muscle group
 ** TODO Add breakpoints in exercise choose and current exercises as well
+** TODO Reinstate and distribute static build
 ** TODO Muscle information (what muscle is where and so on)
 ** TODO Emojis for categories in new exercise form
 ** TODO Favicon

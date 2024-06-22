@@ -1,16 +1,10 @@
-name: "Build statically with Nix"
+# Taken liberally from https://github.com/marketplace/actions/install-nix
+name: "Build with Nix"
 on: [push]
 jobs:
-  build-static:
+  build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2.4.0
-    - uses: cachix/install-nix-action@v19
-    - run: cat flake.lock
-    - run: nix build .#myocardio-static
-    - run: nix flake check
-    - name: Archive static build
-      uses: actions/upload-artifact@v3
-      with:
-        name: Static executable
-        path: result/bin/myocardio-exe
+    - uses: actions/checkout@v4
+    - uses: cachix/install-nix-action@v27
+    - run: nix build
