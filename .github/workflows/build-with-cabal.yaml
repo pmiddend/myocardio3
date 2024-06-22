@@ -10,4 +10,6 @@ jobs:
         with:
           ghc-version: '9.6'
           cabal-version: '3.10.3.0'
+      - run: |
+          sed -i -e "s/ghc-options:/ghc-options: -Werror/" myocardio.cabal
       - run: cabal v2-build

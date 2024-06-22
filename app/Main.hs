@@ -682,7 +682,7 @@ data MuscleWithWeight = MuscleWithWeight
   }
 
 fromTuple :: (Muscle, Double) -> MuscleWithWeight
-fromTuple (m, w) = MuscleWithWeight m w
+fromTuple (m, w) = MuscleWithWeight {muscle = m, weight = w}
 
 muscleLens :: Muscle -> Traversal' Document (Map.Map Name Text)
 muscleLens muscle' = root . named "svg" ... named "path" . attributeSatisfies "id" (isPrefixOf (packShow muscle' <> "-")) . attrs
