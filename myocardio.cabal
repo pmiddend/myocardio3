@@ -41,6 +41,7 @@ executable myocardio-exe
     , scotty
     , cryptohash-sha256
     , wai-extra
+    , split
     , base16-bytestring
     , xdg-basedir
     , xml-conduit
