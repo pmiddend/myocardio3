@@ -12,7 +12,7 @@ module Main (main) where
 import CMarkGFM (commonmarkToHtml)
 import Control.Applicative (Applicative (pure))
 import Control.Lens (Traversal', over, (...))
-import Control.Monad (when, (>>=))
+import Control.Monad (unless, when, (>>=))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Crypto.Hash.SHA256 (hashlazy)
 import Data.Bifunctor (Bifunctor (second))
@@ -22,7 +22,7 @@ import qualified Data.ByteString.Lazy as BSL
 import Data.Default (def)
 import Data.Either (partitionEithers)
 import Data.Eq (Eq ((/=)), (==))
-import Data.Foldable (Foldable (elem, foldr, null), find, forM_, mapM_, minimumBy, notElem)
+import Data.Foldable (Foldable (elem, foldr, length, null), find, forM_, mapM_, minimumBy, notElem)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
 import Data.Int (Int)
@@ -32,7 +32,7 @@ import Data.List.Split (chunksOf)
 import qualified Data.Map as Map
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, isJust, isNothing, mapMaybe, maybe)
 import Data.Monoid (Monoid (mempty))
-import Data.Ord (Ord ((<), (>)), comparing)
+import Data.Ord (Ord ((<), (<=), (>)), comparing)
 import Data.Semigroup (Semigroup ((<>)))
 import qualified Data.Set as Set
 import Data.String (IsString, String)
@@ -210,8 +210,40 @@ dayDiffText currentTime before =
         1 -> "yesterday"
         n -> packShow n <> " days ago"
 
-currentWorkoutHtml :: Database -> L.Html ()
-currentWorkoutHtml database =
+viewExerciseImageCarousel :: Exercise -> L.Html ()
+viewExerciseImageCarousel exercise = do
+  L.div_
+    [ L.class_ "carousel slide",
+      L.id_ ("carousel-" <> htmlIdFromText (packShow exercise.name)),
+      makeAttributes "data-bs-theme" "dark"
+    ]
+    $ do
+      L.div_
+        [L.class_ "carousel-inner"]
+        ( forM_ (zip [0 ..] exercise.fileReferences) \(i, FileReference fileRef) ->
+            L.div_
+              [ L.class_ "carousel-item" <> if i == (0 :: Int) then L.class_ "active" else mempty
+              ]
+              $ L.img_ [L.src_ ("/uploaded-files/" <> fileRef), L.class_ "d-block w-100"]
+        )
+      unless (length exercise.fileReferences <= 1) do
+        L.button_
+          [ L.type_ "button",
+            L.class_ "carousel-control-prev",
+            makeAttributes "data-bs-target" ("#carousel-" <> htmlIdFromText (packShow exercise.name)),
+            makeAttributes "data-bs-slide" "prev"
+          ]
+          (L.span_ [L.class_ "carousel-control-prev-icon"] mempty)
+        L.button_
+          [ L.type_ "button",
+            L.class_ "carousel-control-next",
+            makeAttributes "data-bs-target" ("#carousel-" <> htmlIdFromText (packShow exercise.name)),
+            makeAttributes "data-bs-slide" "next"
+          ]
+          (L.span_ [L.class_ "carousel-control-next-icon"] mempty)
+
+viewCurrentWorkout :: Database -> L.Html ()
+viewCurrentWorkout database =
   L.div_ [makeId idCurrentWorkout] do
     case database.currentTraining of
       [] -> mempty
@@ -229,34 +261,7 @@ currentWorkoutHtml database =
           forM_ musclesMissing \muscle' -> L.span_ [L.class_ "badge text-bg-warning me-1"] (L.toHtml $ packShow muscle')
         forM_ currentExercises \exWithIn -> do
           L.div_ [L.class_ "mb-3 card"] do
-            L.div_
-              [ L.class_ "carousel slide",
-                L.id_ ("carousel-" <> htmlIdFromText (packShow exWithIn.exercise.name)),
-                makeAttributes "data-bs-theme" "dark"
-              ]
-              do
-                L.div_
-                  [L.class_ "carousel-inner"]
-                  ( forM_ (zip [0 ..] exWithIn.exercise.fileReferences) \(i, FileReference fileRef) ->
-                      L.div_
-                        [ L.class_ "carousel-item" <> if i == (0 :: Int) then L.class_ "active" else mempty
-                        ]
-                        $ L.img_ [L.src_ ("/uploaded-files/" <> fileRef), L.class_ "d-block w-100"]
-                  )
-                L.button_
-                  [ L.type_ "button",
-                    L.class_ "carousel-control-prev",
-                    makeAttributes "data-bs-target" ("#carousel-" <> htmlIdFromText (packShow exWithIn.exercise.name)),
-                    makeAttributes "data-bs-slide" "prev"
-                  ]
-                  (L.span_ [L.class_ "carousel-control-prev-icon"] mempty)
-                L.button_
-                  [ L.type_ "button",
-                    L.class_ "carousel-control-next",
-                    makeAttributes "data-bs-target" ("#carousel-" <> htmlIdFromText (packShow exWithIn.exercise.name)),
-                    makeAttributes "data-bs-slide" "next"
-                  ]
-                  (L.span_ [L.class_ "carousel-control-next-icon"] mempty)
+            viewExerciseImageCarousel exWithIn.exercise
             L.div_ [L.class_ "card-body"] do
               L.h6_ [L.class_ "card-title"] do
                 L.strong_ (L.toHtml (packShow exWithIn.exercise.name))
@@ -302,6 +307,85 @@ viewExerciseListOverview database = do
   forM_ buttonArray \buttonList -> do
     L.div_ [L.class_ "row mb-3"] (forM_ buttonList (L.div_ [L.class_ "col-6 text-center"] . viewButton))
 
+viewSingleExerciseInChooser :: UTCTime -> Database -> Muscle -> Exercise -> L.Html ()
+viewSingleExerciseInChooser currentTime database muscle' exercise =
+  let lastExecutionOfThisExercise :: Maybe (ExerciseWithIntensity Exercise)
+      lastExecutionOfThisExercise =
+        maximumByMay (comparing (.time)) $ filter (\pe -> pe.exercise.name == exercise.name) database.pastExercises
+      beginningOfDayAfterExecution :: Maybe UTCTime
+      beginningOfDayAfterExecution =
+        (\x -> x.time {utctDay = succ x.time.utctDay, utctDayTime = 1}) <$> lastExecutionOfThisExercise
+      nextExerciseAfterThisContainingThisMuscle :: Maybe (ExerciseWithIntensity Exercise)
+      nextExerciseAfterThisContainingThisMuscle =
+        beginningOfDayAfterExecution >>= \x -> find (\e -> e.time > x && muscle' `elem` e.exercise.muscles) database.pastExercises
+      partOfCurrentWorkout :: Bool
+      partOfCurrentWorkout = isJust (find (\e -> e.exercise.name == exercise.name) database.currentTraining)
+      pastTimeReadable = case lastExecutionOfThisExercise of
+        Nothing -> L.p_ "Never executed!"
+        Just lastExecutionInstance ->
+          let firstSorenessBetweenExecutions :: Maybe Soreness
+              firstSorenessBetweenExecutions =
+                find
+                  ( \soreness' ->
+                      soreness'.time
+                        > lastExecutionInstance.time
+                        && soreness'.muscle
+                          == muscle'
+                        && case nextExerciseAfterThisContainingThisMuscle of
+                          Nothing -> True
+                          Just nextExercise ->
+                            soreness'.time < nextExercise.time
+                  )
+                  database.sorenessHistory
+           in do
+                L.span_ $ L.toHtml $ "Last: " <> dayDiffText currentTime lastExecutionInstance.time
+                L.br_ []
+                case firstSorenessBetweenExecutions of
+                  Nothing -> L.span_ "No soreness."
+                  Just lastSoreness -> L.span_ $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji lastSoreness.soreness
+   in L.form_ [L.method_ "post", L.action_ "/toggle-exercise-in-workout"] do
+        L.input_
+          [ L.type_ "hidden",
+            L.name_ "exercise-name",
+            L.value_ (packShow exercise.name)
+          ]
+        L.div_ [L.class_ "mb-3 card"] do
+          viewExerciseImageCarousel exercise
+          L.div_ [L.class_ "card-body"] do
+            L.h5_ [L.class_ "card-title"] do
+              L.span_ $ L.toHtml $ packShow exercise.name
+              when (isJust lastExecutionOfThisExercise && isNothing nextExerciseAfterThisContainingThisMuscle) do
+                L.span_ [L.class_ "ms-2 badge text-bg-secondary"] "Last"
+            L.div_ [L.class_ "card-text"] do
+              if partOfCurrentWorkout
+                then do
+                  L.p_ do
+                    L.em_ "in current workout"
+                  L.button_
+                    [ L.class_ "btn btn-secondary btn-sm",
+                      L.type_ "submit"
+                    ]
+                    do
+                      iconHtml "trash"
+                      "Remove from workout"
+                else do
+                  L.div_ [L.class_ "text-muted mb-3"] pastTimeReadable
+                  L.div_ [L.class_ "mb-3"] do
+                    L.input_
+                      [ L.class_ "form-control mb-1",
+                        L.value_ (maybe "" (intensityToText . (.intensity)) lastExecutionOfThisExercise),
+                        L.name_ "intensity",
+                        L.type_ "text",
+                        L.placeholder_ "Intensity?"
+                      ]
+                    L.button_
+                      [ L.type_ "submit",
+                        L.class_ "btn btn-sm btn-primary"
+                      ]
+                      do
+                        iconHtml "journal-plus"
+                        L.span_ "Add to workout"
+
 viewConcreteMuscleGroupExercises :: UTCTime -> Database -> Muscle -> L.Html ()
 viewConcreteMuscleGroupExercises currentTime database muscle = do
   let exercisePool = filter (\e -> muscle `elem` e.muscles) database.exercises
@@ -316,93 +400,20 @@ viewConcreteMuscleGroupExercises currentTime database muscle = do
             L.em_ "never trained!"
           Just exWithIntensity ->
             L.p_ [L.class_ "text-muted"] do
-              L.em_ $ L.toHtml $ "Last training: " <> dayDiffText currentTime exWithIntensity.time
-              L.br_ []
-              L.span_ $ do
-                L.strong_ $ L.toHtml $ packShow exWithIntensity.exercise.category
-              L.span_ $ L.toHtml $ " (" <> packShow exWithIntensity.exercise.name <> ")"
+              L.em_ $ do
+                L.toHtml $ "Last training: " <> dayDiffText currentTime exWithIntensity.time <> ": "
+                L.strong_ $ L.toHtml $ packShow exWithIntensity.exercise.name
       exercisesForMuscle :: Muscle -> [Exercise]
       exercisesForMuscle muscle' = filter (\e -> muscle' `elem` e.muscles) exercisePool
-      outputExercise :: Muscle -> Exercise -> L.Html ()
-      outputExercise muscle' exerciseToOutput = do
-        let lastExecutionOfThisExercise :: Maybe (ExerciseWithIntensity Exercise)
-            lastExecutionOfThisExercise =
-              maximumByMay (comparing (.time)) $ filter (\pe -> pe.exercise.name == exerciseToOutput.name) database.pastExercises
-            beginningOfDayAfterExecution :: Maybe UTCTime
-            beginningOfDayAfterExecution =
-              (\x -> x.time {utctDay = succ x.time.utctDay, utctDayTime = 1}) <$> lastExecutionOfThisExercise
-            nextExerciseAfterThisContainingThisMuscle :: Maybe (ExerciseWithIntensity Exercise)
-            nextExerciseAfterThisContainingThisMuscle =
-              beginningOfDayAfterExecution >>= \x -> find (\e -> e.time > x && muscle' `elem` e.exercise.muscles) database.pastExercises
-            partOfCurrentWorkout :: Bool
-            partOfCurrentWorkout = isJust (find (\e -> e.exercise.name == exerciseToOutput.name) database.currentTraining)
-            pastTimeReadable = case lastExecutionOfThisExercise of
-              Nothing -> L.p_ "Never executed!"
-              Just lastExecutionInstance ->
-                let firstSorenessBetweenExecutions :: Maybe Soreness
-                    firstSorenessBetweenExecutions =
-                      find
-                        ( \soreness' ->
-                            soreness'.time
-                              > lastExecutionInstance.time
-                              && soreness'.muscle
-                                == muscle'
-                              && case nextExerciseAfterThisContainingThisMuscle of
-                                Nothing -> True
-                                Just nextExercise ->
-                                  soreness'.time < nextExercise.time
-                        )
-                        database.sorenessHistory
-                 in do
-                      L.span_ $ L.toHtml $ "Last: " <> dayDiffText currentTime lastExecutionInstance.time
-                      L.br_ []
-                      case firstSorenessBetweenExecutions of
-                        Nothing -> L.span_ "No soreness."
-                        Just lastSoreness -> L.span_ $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji lastSoreness.soreness
-        L.form_ [L.method_ "post", L.action_ "/toggle-exercise-in-workout"] do
-          L.input_
-            [ L.type_ "hidden",
-              L.name_ "exercise-name",
-              L.value_ (packShow exerciseToOutput.name)
-            ]
-          L.h5_ do
-            L.span_ $ L.toHtml $ packShow exerciseToOutput.name
-            when (isJust lastExecutionOfThisExercise && isNothing nextExerciseAfterThisContainingThisMuscle) do
-              L.span_ [L.class_ "ms-2 badge text-bg-secondary"] "Last"
-          if partOfCurrentWorkout
-            then L.button_
-              [ L.class_ "btn btn-secondary btn-sm",
-                L.type_ "submit"
-              ]
-              do
-                iconHtml "trash"
-                "Remove from workout"
-            else do
-              L.div_ [L.class_ "text-muted mb-3"] pastTimeReadable
-              L.div_ [L.class_ "mb-3"] do
-                L.input_
-                  [ L.class_ "form-control mb-1",
-                    L.value_ (maybe "" (intensityToText . (.intensity)) lastExecutionOfThisExercise),
-                    L.name_ "intensity",
-                    L.type_ "text",
-                    L.placeholder_ "Intensity?"
-                  ]
-                L.button_
-                  [ L.type_ "submit",
-                    L.class_ "btn btn-sm btn-primary"
-                  ]
-                  do
-                    iconHtml "journal-plus"
-                    L.span_ "Add to workout"
-              L.hr_ []
 
   case exercisesForMuscle muscle of
     [] -> mempty
     exercisesForThisMuscle -> do
       L.h2_ [L.id_ ("training-section-" <> htmlIdFromText (packShow muscle)), L.class_ "mt-3"] (L.toHtml $ packShow muscle)
-      L.div_ [L.class_ "ms-3"] do
+      L.div_ do
         lastTraining muscle
-        L.div_ [L.class_ "text-bg-light p-3 border rounded"] $ forM_ exercisesForThisMuscle (outputExercise muscle)
+        L.div_ do
+          forM_ exercisesForThisMuscle (viewSingleExerciseInChooser currentTime database muscle)
 
 viewChoose :: Database -> L.Html ()
 viewChoose database = do
@@ -538,8 +549,8 @@ exerciseDescriptionHtml e = do
   L.toHtmlRaw $ commonmarkToHtml [] [] e.description
   forM_ e.fileReferences exerciseImageHtml
 
-exercisesHtml :: Database -> Maybe Exercise -> L.Html ()
-exercisesHtml db existingExercise = do
+viewExerciseList :: Database -> Maybe Exercise -> L.Html ()
+viewExerciseList db existingExercise = do
   L.div_ [makeId idExerciseForm, L.class_ "mb-3"] do
     maybe newExerciseButtonHtml exerciseFormHtml existingExercise
   L.hr_ []
@@ -678,7 +689,7 @@ pageCurrentHtml currentTime db = htmlSkeleton PageCurrent $ do
       L.li_ $ L.a_ [makeHref idExerciseHistory] do
         iconHtml "clipboard-data-fill"
         L.span_ "Exercise History"
-  currentWorkoutHtml db
+  viewCurrentWorkout db
   L.hr_ [L.class_ "mb-3"]
   sorenessInputAndOutput db
   L.hr_ [L.class_ "mb-3"]
@@ -773,7 +784,7 @@ main = scotty 3000 do
         html $
           renderText $
             htmlSkeleton PageExercises $
-              exercisesHtml
+              viewExerciseList
                 db
                 ( if withForm == Just True
                     then
@@ -796,7 +807,7 @@ main = scotty 3000 do
             html $
               renderText $
                 htmlSkeleton PageExercises $
-                  exercisesHtml
+                  viewExerciseList
                     db
                     (Just exerciseFound)
 
