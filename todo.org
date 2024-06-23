@@ -129,18 +129,29 @@ CLOSED: [2024-06-22 Sat 08:08]
 :LOGBOOK:
 CLOCK: [2024-06-22 Sat 07:59]--[2024-06-22 Sat 08:08] =>  0:09
 :END:
-** TODO Remove mobility/endurance concepts
+** DONE Remove mobility/endurance concepts
+CLOSED: [2024-06-22 Sat 08:38]
 :LOGBOOK:
-CLOCK: [2024-06-22 Sat 08:08]
+CLOCK: [2024-06-22 Sat 08:08]--[2024-06-22 Sat 09:08] =>  1:00
 :END:
 
 - Doesn't have to be removed from the data, but from the UI first.
+** TODO Improve UX for exercise list (asterisks, unordered list)
+:LOGBOOK:
+CLOCK: [2024-06-23 Sun 07:57]
+CLOCK: [2024-06-22 Sat 09:39]--[2024-06-22 Sat 12:53] =>  3:14
+:END:
+
+- [X] First, convert list to colored buttons and add section filter for exercises
+- [ ] Add backlinks from exercise to overview, and check redirect from muscle to overview
+** TODO Rethink some muscles — peroneals?
 ** TODO Add "change intensity after adding to current"
 :LOGBOOK:
 CLOCK: [2024-06-22 Sat 08:08]--[2024-06-22 Sat 08:08] =>  0:00
 :END:
 ** TODO Ability to remove exercises entirely
-** TODO Better Nix deployment
+** TODO Soreness: just list of muscles with state on the right?
+** TODO Server: Better Nix deployment
 :LOGBOOK:
 CLOCK: [2024-03-30 Sat 08:15]--[2024-03-30 Sat 08:25] =>  0:10
 :END:

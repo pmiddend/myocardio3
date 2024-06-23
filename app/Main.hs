@@ -12,7 +12,7 @@ module Main (main) where
 import CMarkGFM (commonmarkToHtml)
 import Control.Applicative (Applicative (pure))
 import Control.Lens (Traversal', over, (...))
-import Control.Monad (unless, when, (>>=))
+import Control.Monad (when, (>>=))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Crypto.Hash.SHA256 (hashlazy)
 import Data.Bifunctor (Bifunctor (second))
@@ -74,7 +74,7 @@ import System.IO (FilePath, IO)
 import Text.Read (Read)
 import Text.XML (Document, Name, readFile, renderLBS)
 import Text.XML.Lens (attributeSatisfies, attrs, named, root)
-import Web.Scotty (ActionM, File, Parsable (parseParam, parseParamList), capture, file, files, finish, formParam, formParamMaybe, formParams, get, html, middleware, pathParam, post, queryParamMaybe, raw, readEither, redirect, regex, scotty, setHeader, status)
+import Web.Scotty (ActionM, File, Parsable (parseParam, parseParamList), capture, file, files, finish, formParam, formParamMaybe, formParams, get, html, middleware, pathParam, post, queryParamMaybe, raw, readEither, redirect, regex, scotty, setHeader, status, text)
 import Prelude (Double, Either (Left, Right), Enum (succ), Fractional ((/)), Num ((*), (+), (-)), RealFrac (round), Show (show), Traversable (traverse), realToFrac)
 
 instance (Parsable a) => Parsable (NE.NonEmpty a) where
@@ -113,6 +113,9 @@ makeHref (HtmlId i) = L.href_ ("#" <> i)
 
 packShow :: (Show a) => a -> Text
 packShow = pack . show
+
+packShowLazy :: (Show a) => a -> TL.Text
+packShowLazy = TL.pack . show
 
 htmlSkeleton :: CurrentPage -> L.Html () -> L.Html ()
 htmlSkeleton page content = do
@@ -295,18 +298,13 @@ viewExerciseListOverview database = do
         L.a_ [L.href_ ("/training/" <> packShow muscle'), L.class_ (viewButtonClass muscle')] do
           L.span_ $ L.toHtml (packShow muscle')
       buttonArray :: [[Muscle]]
-      buttonArray = chunksOf 3 allMuscles
+      buttonArray = chunksOf 2 allMuscles
   forM_ buttonArray \buttonList -> do
-    L.div_ [L.class_ "row mb-3"] (forM_ buttonList (\button -> L.div_ [L.class_ "col-4 text-center"] (viewButton button)))
+    L.div_ [L.class_ "row mb-3"] (forM_ buttonList (L.div_ [L.class_ "col-6 text-center"] . viewButton))
 
--- L.div_ [L.class_ "text-bg-light p-2"] do
---   L.ul_ $ forM_ allMuscles \muscle' -> do
---     L.li_ $ makeButton muscle'
-
-viewChoose :: UTCTime -> Database -> Category -> L.Html ()
-viewChoose currentTime database category' = do
-  viewExerciseListOverview database
-  let exercisePool = filter (\e -> e.category == category') database.exercises
+viewConcreteMuscleGroupExercises :: UTCTime -> Database -> Muscle -> L.Html ()
+viewConcreteMuscleGroupExercises currentTime database muscle = do
+  let exercisePool = filter (\e -> muscle `elem` e.muscles) database.exercises
       exerciseWithIntensityTrainsMuscle :: Muscle -> ExerciseWithIntensity Exercise -> Bool
       exerciseWithIntensityTrainsMuscle muscle' e = muscle' `elem` e.exercise.muscles
       lastTraining :: Muscle -> L.Html ()
@@ -398,17 +396,17 @@ viewChoose currentTime database category' = do
                     L.span_ "Add to workout"
               L.hr_ []
 
-      muscleToTrainingHtml :: Muscle -> L.Html ()
-      muscleToTrainingHtml muscle' = do
-        case exercisesForMuscle muscle' of
-          [] -> mempty
-          exercisesForThisMuscle -> do
-            L.h2_ [L.id_ ("training-section-" <> htmlIdFromText (packShow muscle')), L.class_ "mt-3"] (L.toHtml $ packShow muscle')
-            L.div_ [L.class_ "ms-3"] do
-              lastTraining muscle'
-              L.div_ [L.class_ "text-bg-light p-3 border rounded"] $ forM_ exercisesForThisMuscle (outputExercise muscle')
+  case exercisesForMuscle muscle of
+    [] -> mempty
+    exercisesForThisMuscle -> do
+      L.h2_ [L.id_ ("training-section-" <> htmlIdFromText (packShow muscle)), L.class_ "mt-3"] (L.toHtml $ packShow muscle)
+      L.div_ [L.class_ "ms-3"] do
+        lastTraining muscle
+        L.div_ [L.class_ "text-bg-light p-3 border rounded"] $ forM_ exercisesForThisMuscle (outputExercise muscle)
 
-  mapM_ muscleToTrainingHtml allMuscles
+viewChoose :: Database -> L.Html ()
+viewChoose database = do
+  viewExerciseListOverview database
 
 exerciseFormMusclesParam :: (IsString a) => a
 exerciseFormMusclesParam = "muscles"
@@ -565,6 +563,7 @@ exercisesHtml db existingExercise = do
 
 data CurrentPage
   = PageCurrent
+  | PageMuscle Muscle
   | PageExerciseList
   | PageExercises
   deriving (Eq, Show, Read)
@@ -573,6 +572,7 @@ pageToPath :: CurrentPage -> Text
 pageToPath PageCurrent = "/"
 pageToPath PageExercises = "/exercises"
 pageToPath PageExerciseList = "/training"
+pageToPath (PageMuscle m) = "/training/" <> packShow m
 
 instance Parsable CurrentPage where
   parseParam = readEither
@@ -585,13 +585,13 @@ data PageDescription = PageDescription
 
 viewHeader :: CurrentPage -> L.Html ()
 viewHeader currentPage =
-  let exerciseLists = [PageDescription PageExerciseList "card-checklist" "Choose"]
-      otherPages =
+  let allPages =
         [ PageDescription PageCurrent "graph-down-arrow" "Current",
+          PageDescription PageExerciseList "card-checklist" "Choose",
           PageDescription PageExercises "box2-heart" "Edit"
         ]
-      makeItem :: PageDescription -> L.Html ()
-      makeItem pd =
+      viewItem :: PageDescription -> L.Html ()
+      viewItem pd =
         L.li_ [L.class_ "nav-item"] do
           L.a_
             [ L.href_ (pageToPath pd.enum),
@@ -602,7 +602,10 @@ viewHeader currentPage =
               iconHtml pd.icon
               L.toHtml pd.description
    in L.header_ [L.class_ "py-3"] do
-        L.div_ [L.class_ "d-flex justify-content-center align-items-center"] (L.ul_ [L.class_ "nav nav-tabs"] (mapM_ makeItem (exerciseLists <> otherPages)))
+        L.div_ [L.class_ "d-flex justify-content-center align-items-center"] do
+          L.ul_
+            [L.class_ "nav nav-tabs"]
+            (mapM_ viewItem allPages)
 
 getUploadedFileDir :: (MonadIO m) => m FilePath
 getUploadedFileDir = do
@@ -799,9 +802,15 @@ main = scotty 3000 do
 
   get (capture "/training") do
     db <- readDatabase
-    currentTime <- liftIO getCurrentTime
     html $ renderText $ htmlSkeleton PageExerciseList $ do
-      viewChoose currentTime db Strength
+      viewChoose db
+
+  get (capture "/training/:muscle") do
+    db <- readDatabase
+    currentTime <- liftIO getCurrentTime
+    muscle <- pathParam "muscle"
+    html $ renderText $ htmlSkeleton (PageMuscle muscle) $ do
+      viewConcreteMuscleGroupExercises currentTime db muscle
 
   get "/uploaded-files/:fn" do
     fileName <- pathParam "fn"
@@ -861,6 +870,7 @@ main = scotty 3000 do
     case find (\e -> e.name == exerciseName) readDb.exercises of
       Nothing -> do
         status status400
+        text ("you asked me to toggle " <> packShowLazy exerciseName <> " but I don't have that exercise in my list!")
         finish
       Just exercise' -> do
         case find (\ewi -> ewi.exercise.name == exerciseName) readDb.currentTraining of
@@ -889,7 +899,7 @@ main = scotty 3000 do
         returnToCurrent :: Maybe Bool <- formParamMaybe "return-to-current"
         redirect case returnToCurrent of
           Nothing ->
-            TL.fromStrict $ "/training/" <> packShow exercise'.category
+            TL.fromStrict "/training"
           Just _ -> "/"
 
   post "/update-soreness" do
