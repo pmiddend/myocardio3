@@ -136,26 +136,35 @@ CLOCK: [2024-06-22 Sat 08:08]--[2024-06-22 Sat 09:08] =>  1:00
 :END:
 
 - Doesn't have to be removed from the data, but from the UI first.
-** TODO Improve UX for exercise list (asterisks, unordered list)
+** DONE Show exercise images in selection
+CLOSED: [2024-06-23 Sun 08:51]
+:LOGBOOK:
+CLOCK: [2024-06-23 Sun 08:14]
+:END:
+
+- [X] Add it
+- [X] Understand caching, can we cache images more aggressively?
+** DONE Improve UX for exercise list (asterisks, unordered list)
+CLOSED: [2024-06-23 Sun 08:51]
 :LOGBOOK:
 CLOCK: [2024-06-23 Sun 07:57]--[2024-06-23 Sun 08:14] =>  0:17
 CLOCK: [2024-06-22 Sat 09:39]--[2024-06-22 Sat 12:53] =>  3:14
 :END:
 
 - [X] First, convert list to colored buttons and add section filter for exercises
-- [ ] Add backlinks from exercise to overview, and check redirect from muscle to overview
-** TODO Show exercise images in selection
-:LOGBOOK:
-CLOCK: [2024-06-23 Sun 08:14]
-:END:
-
-- [X] Add it
-- [ ] Understand caching, can we cache images more aggressively?
+- [X] Add backlinks from exercise to overview, and check redirect from muscle to overview
 ** TODO Add "change intensity after adding to current"
 :LOGBOOK:
+CLOCK: [2024-06-23 Sun 08:51]
 CLOCK: [2024-06-22 Sat 08:08]--[2024-06-22 Sat 08:08] =>  0:00
 :END:
+
 ** TODO Ability to remove exercises entirely
+** TODO Write a README with instructions
+
+- Who is this for? Me specifically
+- Explain how it works
+** TODO Add static build artifacts
 ** TODO Rethink some muscles — peroneals?
 ** TODO Soreness: just list of muscles with state on the right?
 ** TODO Server: Better Nix deployment

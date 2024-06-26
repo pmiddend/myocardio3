@@ -263,21 +263,37 @@ viewCurrentWorkout database =
           L.div_ [L.class_ "mb-3 card"] do
             viewExerciseImageCarousel exWithIn.exercise
             L.div_ [L.class_ "card-body"] do
-              L.h6_ [L.class_ "card-title"] do
+              L.h5_ [L.class_ "card-title"] do
                 L.strong_ (L.toHtml (packShow exWithIn.exercise.name))
-              L.h6_ [L.class_ "card-subtitle"] (L.toHtml (intensityToText exWithIn.intensity))
-              L.p_ [L.class_ "card-text"] do
+              L.h6_ [L.class_ "card-subtitle"] do
+                "Intensity: " <> L.strong_ (L.toHtml (intensityToText exWithIn.intensity))
+              L.p_ [L.class_ "card-text text-info"] do
                 L.toHtmlRaw $ commonmarkToHtml [] [] exWithIn.exercise.description
                 L.form_ [L.action_ "/toggle-exercise-in-workout", L.method_ "post"] do
                   L.input_ [L.type_ "hidden", L.name_ "return-to-current", L.value_ (packShow True)]
                   L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.exercise.name)]
                   L.button_
                     [ L.type_ "submit",
-                      L.class_ "btn btn-secondary"
+                      L.class_ "btn btn-secondary btn-sm"
                     ]
                     do
                       iconHtml "trash"
                       L.span_ "Remove from workout"
+                L.form_ [L.action_ "/change-intensity", L.method_ "post"] do
+                  L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.exercise.name)]
+                  L.input_
+                    [ L.class_ "form-control mb-1",
+                      L.value_ (intensityToText exWithIn.intensity),
+                      L.name_ "intensity",
+                      L.type_ "text"
+                    ]
+                  L.button_
+                    [ L.type_ "submit",
+                      L.class_ "btn btn-sm btn-primary"
+                    ]
+                    do
+                      iconHtml "send"
+                      L.span_ "Change intensity"
 
         L.form_ [L.action_ "/commit-workout", L.method_ "post"] do
           L.button_
@@ -912,6 +928,28 @@ main = scotty 3000 do
           Nothing ->
             TL.fromStrict "/training"
           Just _ -> "/"
+  post "/change-intensity" do
+    exerciseName <- formParam "exercise-name"
+    currentTime <- liftIO getCurrentTime
+    db <- readDatabase
+
+    case find (\e -> e.name == exerciseName) db.exercises of
+      Nothing -> do
+        status status400
+        text ("you asked me to change the intensity for exercise " <> packShowLazy exerciseName <> " but I don't have that exercise in my list!")
+        finish
+      Just exercise' -> do
+        intensity' <- formParam "intensity"
+        let currentTrainingWithoutOldIntensity = filter (\ewi -> ewi.exercise.name /= exerciseName) db.currentTraining
+            newCurrentTraining =
+              ExerciseWithIntensity
+                { exercise = exercise',
+                  intensity = intensity',
+                  time = currentTime
+                }
+                : currentTrainingWithoutOldIntensity
+        modifyDb' (\db' -> db' {currentTraining = newCurrentTraining})
+        redirect "/"
 
   post "/update-soreness" do
     muscle' <- formParam "muscle"
