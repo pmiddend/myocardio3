@@ -83,7 +83,7 @@ import System.IO (FilePath, IO)
 import Text.Read (Read)
 import Text.XML (Document, Name, readFile, renderLBS)
 import Text.XML.Lens (attributeSatisfies, attrs, named, root)
-import Web.Scotty (ActionM, File, Parsable (parseParam, parseParamList), capture, file, files, finish, formParam, formParamMaybe, formParams, get, html, middleware, pathParam, post, queryParamMaybe, raw, readEither, redirect, regex, scotty, setHeader, status, text)
+import Web.Scotty (ActionM, File, Parsable (parseParam, parseParamList), capture, file, files, finish, formParam, formParamMaybe, formParams, get, html, middleware, pathParam, post, queryParam, queryParamMaybe, raw, readEither, redirect, regex, scotty, setHeader, status, text)
 import Prelude (Double, Either (Left, Right), Enum (succ), Fractional ((/)), Num ((*), (+), (-)), RealFrac (round), Show (show), Traversable (traverse), realToFrac)
 
 instance (Parsable a) => Parsable (NE.NonEmpty a) where
