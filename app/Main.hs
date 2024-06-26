@@ -17,8 +17,8 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Crypto.Hash.SHA256 (hashlazy)
 import Data.Bifunctor (Bifunctor (second))
 import Data.Bool (Bool (True), (&&))
-import qualified Data.ByteString.Base16 as Base16
-import qualified Data.ByteString.Lazy as BSL
+import Data.ByteString.Base16 qualified as Base16
+import Data.ByteString.Lazy qualified as BSL
 import Data.Default (def)
 import Data.Either (partitionEithers)
 import Data.Eq (Eq ((/=)), (==))
@@ -26,49 +26,58 @@ import Data.Foldable (Foldable (elem, foldr, length, null), find, forM_, mapM_, 
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
 import Data.Int (Int)
-import Data.List (filter, reverse, sortBy, zip)
-import qualified Data.List.NonEmpty as NE
+import Data.List (filter, lookup, reverse, sortBy, zip)
+import Data.List.NonEmpty qualified as NE
 import Data.List.Split (chunksOf)
-import qualified Data.Map as Map
+import Data.Map qualified as Map
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, isJust, isNothing, mapMaybe, maybe)
 import Data.Monoid (Monoid (mempty))
 import Data.Ord (Ord ((<), (<=), (>)), comparing)
 import Data.Semigroup (Semigroup ((<>)))
-import qualified Data.Set as Set
+import Data.Set qualified as Set
 import Data.String (IsString, String)
 import Data.Text (Text, isPrefixOf, pack, replace, unpack)
-import qualified Data.Text.Encoding as TE
-import qualified Data.Text.Lazy as TL
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TE
+import Data.Text.Lazy qualified as TL
 import Data.Time (Day (ModifiedJulianDay), NominalDiffTime)
 import Data.Time.Clock (UTCTime (utctDay, utctDayTime), diffUTCTime, getCurrentTime, nominalDay)
 import Data.Tuple (snd)
 import Lucid (renderText)
-import qualified Lucid as L
+import Lucid qualified as L
 import Lucid.Base (makeAttributes)
-import MyocardioApp.Database
+import Myocardio.Database
   ( Category (Strength),
     Database,
     DatabaseF (currentTraining, pastExercises, sorenessHistory),
     Exercise (Exercise, category, description, fileReferences, muscles, name),
     ExerciseName (ExerciseName),
-    ExerciseWithIntensity (ExerciseWithIntensity, exercise, intensity, time),
+    ExerciseWithIntensity (exercise, intensity, time),
     FileReference (FileReference),
     Intensity (Intensity),
     Muscle (Pecs),
     Soreness (Soreness, muscle, soreness, time),
     SorenessValue (LittleSore, NotSore, VerySore),
+    addExercise,
+    addSoreness,
     allCategories,
     allMuscles,
+    changeIntensity,
+    commitWorkout,
     exercises,
+    getHomeDbFile,
     intensityToText,
-    modifyDb',
+    modifyExercise,
     readDatabase,
+    removeExercise,
+    toggleExercise,
   )
 import Network.HTTP.Types.Status (status400)
 import Network.Wai.Middleware.Static (addBase, isNotAbsolute, noDots, staticPolicy)
 import Network.Wai.Parse (FileInfo (fileContent, fileName))
 import Safe (maximumByMay)
 import System.Directory (createDirectoryIfMissing, removeFile)
+import System.Environment (getEnvironment)
 import System.Environment.XDG.BaseDir (getUserDataDir)
 import System.IO (FilePath, IO)
 import Text.Read (Read)
@@ -574,7 +583,7 @@ viewExerciseList db existingExercise = do
     iconHtml "box2-heart"
     L.span_ "Exercise Descriptions"
   forM_ db.exercises \exercise' -> do
-    L.h3_ [L.id_ ("description-" <> htmlIdFromText (packShow exercise'.name))] do
+    L.h3_ [L.id_ ("description-" <> htmlIdFromText (packShow exercise'.name)), L.class_ "d-flex"] do
       L.form_ [L.action_ "/exercises"] do
         L.input_ [L.type_ "hidden", L.name_ "edit-exercise", L.value_ (packShow exercise'.name)]
         L.button_
@@ -582,6 +591,12 @@ viewExerciseList db existingExercise = do
             L.type_ "submit"
           ]
           (iconHtml' "pencil-square")
+      L.form_ [L.action_ ("/remove-exercise/" <> packShow exercise'.name)] do
+        L.button_
+          [ L.class_ "btn btn-sm btn-danger me-2",
+            L.type_ "submit"
+          ]
+          (iconHtml' "trash-fill")
       L.toHtml (packShow exercise'.name)
     L.div_ [L.class_ "gap-1 mb-3"] do
       L.span_ [L.class_ "badge text-bg-dark me-1"] (L.toHtml $ packShow exercise'.category)
@@ -591,12 +606,14 @@ viewExerciseList db existingExercise = do
 data CurrentPage
   = PageCurrent
   | PageMuscle Muscle
+  | PageExerciseDeletion ExerciseName
   | PageExerciseList
   | PageExercises
   deriving (Eq, Show, Read)
 
 pageToPath :: CurrentPage -> Text
 pageToPath PageCurrent = "/"
+pageToPath (PageExerciseDeletion name) = "/remove-exercise/" <> packShow name
 pageToPath PageExercises = "/exercises"
 pageToPath PageExerciseList = "/training"
 pageToPath (PageMuscle m) = "/training/" <> packShow m
@@ -747,15 +764,24 @@ generateWeightedSvg muscleWeights frontOrBack = do
       def
     $ foldr applyWeight oldDocument muscleWeights
 
+getDbFile :: (MonadIO m) => m FilePath
+getDbFile = do
+  env <- liftIO $ getEnvironment
+  case lookup "MYOCARDIO_DB_FILE" env of
+    Nothing -> getHomeDbFile
+    Just dbFile -> pure dbFile
+
 main :: IO ()
 main = scotty 3000 do
   get "/" do
-    db <- readDatabase
+    homeDbFile <- getDbFile
+    db <- readDatabase homeDbFile
     currentTime <- liftIO getCurrentTime
     html $ renderText $ pageCurrentHtml currentTime db
 
   get (regex "/muscles/([^\\.]*).svg") do
-    db <- readDatabase
+    homeDbFile <- getDbFile
+    db <- readDatabase homeDbFile
     frontOrBack <- pathParam "1"
     currentTime <- liftIO getCurrentTime
     let lastExercises :: [(Muscle, Maybe UTCTime)]
@@ -792,10 +818,11 @@ main = scotty 3000 do
     raw weightedSvg
 
   get "/exercises" do
-    db <- readDatabase
+    homeDbFile <- getDbFile
+    db <- readDatabase homeDbFile
     withForm <- queryParamMaybe "with-form"
-    editExercise <- queryParamMaybe "edit-exercise"
-    case editExercise of
+    editExercise' <- queryParamMaybe "edit-exercise"
+    case editExercise' of
       Nothing ->
         html $
           renderText $
@@ -814,8 +841,8 @@ main = scotty 3000 do
                           }
                     else Nothing
                 )
-      Just editExercise' ->
-        case find (\e -> e.name == editExercise') db.exercises of
+      Just editExercise'' ->
+        case find (\e -> e.name == editExercise'') db.exercises of
           Nothing -> do
             status status400
             finish
@@ -828,12 +855,14 @@ main = scotty 3000 do
                     (Just exerciseFound)
 
   get (capture "/training") do
-    db <- readDatabase
+    homeDbFile <- getDbFile
+    db <- readDatabase homeDbFile
     html $ renderText $ htmlSkeleton PageExerciseList $ do
       viewChoose db
 
   get (capture "/training/:muscle") do
-    db <- readDatabase
+    homeDbFile <- getDbFile
+    db <- readDatabase homeDbFile
     currentTime <- liftIO getCurrentTime
     muscle <- pathParam "muscle"
     html $ renderText $ htmlSkeleton (PageMuscle muscle) $ do
@@ -844,21 +873,42 @@ main = scotty 3000 do
     uploadedFileDir <- getUploadedFileDir
     file (uploadedFileDir <> "/" <> fileName)
 
+  get "/remove-exercise/:exercise-name" do
+    exerciseName <- pathParam "exercise-name"
+    -- Explicit annotation because it could be Text, LazyText, String, ...
+    sure :: Maybe Text <- queryParamMaybe "sure"
+    if sure == Just "yes"
+      then do
+        homeDbFile <- getDbFile
+        removeExercise homeDbFile exerciseName
+        redirect "/"
+      else do
+        html $ renderText $ htmlSkeleton (PageExerciseDeletion exerciseName) do
+          L.div_ [L.class_ "alert alert-danger"] do
+            L.span_ do
+              iconHtml "exclamation-circle-fill"
+              "Are you sure you want to delete exercise "
+              L.strong_ (L.toHtml $ packShow exerciseName)
+            L.form_ [L.action_ ("/remove-exercise/" <> packShow exerciseName)] do
+              L.input_ [L.type_ "hidden", L.name_ "sure", L.value_ "yes"]
+              L.button_ [L.type_ "submit", L.class_ "btn btn-danger"] "Yes"
+
   post "/edit-exercise" do
-    originalExerciseName <- formParam "original-exercise-name"
     -- Very very weird behavior - why is there always at least one file, with not even an empty
     -- file name but ""?
     uploadedFiles <- filter (\(_, fileData) -> fileName fileData /= "\"\"") <$> files
     writtenFiles <- traverse uploadSingleFile uploadedFiles
     musclesRaw <- paramValues exerciseFormMusclesParam
     case traverse (parseParam . TL.fromStrict) musclesRaw of
-      Left _parseError -> do
+      Left parseError -> do
         status status400
+        text ("I couldn't parse all the muscles you gave me: " <> packShowLazy parseError)
         finish
       Right muscles' -> do
         case NE.nonEmpty muscles' of
           Nothing -> do
             status status400
+            text "I got an empty list of muscles!"
             finish
           Just muscles'' -> do
             category' <- formParam exerciseFormCategoryParam
@@ -867,133 +917,78 @@ main = scotty 3000 do
             toDelete <- paramValues exerciseFormFilesToDeleteParam
             uploadedFileDir <- getUploadedFileDir
             forM_ toDelete (liftIO . removeFile . unpack . (\fn -> pack uploadedFileDir <> "/" <> fn))
-            modifyDb' \db ->
-              let existingExercise = find (\e -> e.name == originalExerciseName) db.exercises
-               in db
-                    { exercises =
-                        -- Add a new one
-                        Exercise
-                          { muscles = muscles'',
-                            category = category',
-                            description = description',
-                            name = name',
-                            fileReferences =
-                              maybe
-                                []
-                                (\existing -> filter (\(FileReference fileRef) -> fileRef `notElem` toDelete) existing.fileReferences)
-                                existingExercise
-                                <> writtenFiles
-                          }
-                          -- ...and filter out the existing one
-                          : filter (\e -> e.name /= name') db.exercises
-                    }
+            homeDbFile <- getDbFile
+            originalExerciseName <- formParam "original-exercise-name"
+            if Text.null originalExerciseName
+              then
+                addExercise
+                  homeDbFile
+                  ( Exercise
+                      { muscles = muscles'',
+                        category = category',
+                        description = description',
+                        name = name',
+                        fileReferences = writtenFiles
+                      }
+                  )
+              else
+                modifyExercise
+                  homeDbFile
+                  (ExerciseName originalExerciseName)
+                  ( \oldExercise ->
+                      let newFiles :: [FileReference]
+                          newFiles =
+                            filter
+                              (\(FileReference fileRef) -> fileRef `notElem` toDelete)
+                              oldExercise.fileReferences
+                              <> writtenFiles
+                       in oldExercise
+                            { muscles = muscles'',
+                              category = category',
+                              description = description',
+                              name = name',
+                              fileReferences = newFiles
+                            }
+                  )
             redirect "/exercises"
 
   post "/toggle-exercise-in-workout" do
     exerciseName <- formParam "exercise-name"
-    currentTime <- liftIO getCurrentTime
-    readDb <- readDatabase
+    intensity' <- formParam "intensity"
 
-    case find (\e -> e.name == exerciseName) readDb.exercises of
-      Nothing -> do
-        status status400
-        text ("you asked me to toggle " <> packShowLazy exerciseName <> " but I don't have that exercise in my list!")
-        finish
-      Just exercise' -> do
-        case find (\ewi -> ewi.exercise.name == exerciseName) readDb.currentTraining of
-          Nothing -> do
-            intensity' <- formParam "intensity"
-            modifyDb'
-              ( \db ->
-                  db
-                    { currentTraining =
-                        ExerciseWithIntensity
-                          { exercise = exercise',
-                            intensity = intensity',
-                            time = currentTime
-                          }
-                          : db.currentTraining
-                    }
-              )
-          Just _ -> do
-            modifyDb'
-              ( \db ->
-                  db
-                    { currentTraining =
-                        filter (\ewi -> ewi.exercise.name /= exerciseName) db.currentTraining
-                    }
-              )
-        returnToCurrent :: Maybe Bool <- formParamMaybe "return-to-current"
-        redirect case returnToCurrent of
-          Nothing ->
-            TL.fromStrict "/training"
-          Just _ -> "/"
+    homeDbFile <- getDbFile
+    toggleExercise homeDbFile exerciseName intensity'
+    returnToCurrent :: Maybe Bool <- formParamMaybe "return-to-current"
+    redirect case returnToCurrent of
+      Nothing ->
+        TL.fromStrict "/training"
+      Just _ -> "/"
+
   post "/change-intensity" do
     exerciseName <- formParam "exercise-name"
-    currentTime <- liftIO getCurrentTime
-    db <- readDatabase
-
-    case find (\e -> e.name == exerciseName) db.exercises of
-      Nothing -> do
-        status status400
-        text ("you asked me to change the intensity for exercise " <> packShowLazy exerciseName <> " but I don't have that exercise in my list!")
-        finish
-      Just exercise' -> do
-        intensity' <- formParam "intensity"
-        let currentTrainingWithoutOldIntensity = filter (\ewi -> ewi.exercise.name /= exerciseName) db.currentTraining
-            newCurrentTraining =
-              ExerciseWithIntensity
-                { exercise = exercise',
-                  intensity = intensity',
-                  time = currentTime
-                }
-                : currentTrainingWithoutOldIntensity
-        modifyDb' (\db' -> db' {currentTraining = newCurrentTraining})
-        redirect "/"
+    intensity' <- formParam "intensity"
+    homeDbFile <- getDbFile
+    changeIntensity homeDbFile exerciseName intensity'
+    redirect "/"
 
   post "/update-soreness" do
     muscle' <- formParam "muscle"
     howSore' <- formParam "how-sore"
 
-    currentTime <- liftIO getCurrentTime
-
-    modifyDb'
-      ( \db ->
-          db
-            { sorenessHistory =
-                Soreness
-                  { time = currentTime,
-                    muscle = muscle',
-                    soreness = howSore'
-                  }
-                  : db.sorenessHistory
-            }
-      )
+    homeDbFile <- getDbFile
+    addSoreness homeDbFile muscle' howSore'
 
     redirect "/"
 
   post "/reset-soreness" do
     muscle' <- formParam "muscle"
-
-    currentTime <- liftIO getCurrentTime
-
-    modifyDb'
-      ( \db ->
-          db
-            { sorenessHistory =
-                Soreness
-                  { time = currentTime,
-                    muscle = muscle',
-                    soreness = NotSore
-                  }
-                  : db.sorenessHistory
-            }
-      )
-
+    homeDbFile <- getDbFile
+    addSoreness homeDbFile muscle' NotSore
     redirect "/"
 
   post "/commit-workout" do
-    modifyDb' \db -> db {currentTraining = [], pastExercises = db.currentTraining <> db.pastExercises}
+    homeDbFile <- getDbFile
+    commitWorkout homeDbFile
     redirect "/"
 
   middleware (staticPolicy (noDots <> isNotAbsolute <> addBase staticBasePath))

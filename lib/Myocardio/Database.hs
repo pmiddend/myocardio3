@@ -1,9 +1,8 @@
-{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module MyocardioApp.Database
+module Myocardio.Database
   ( allMuscles,
     Muscle (..),
     Category (..),
@@ -11,19 +10,27 @@ module MyocardioApp.Database
     Exercise (..),
     FileReference (..),
     ExerciseName (..),
+    commitWorkout,
     Intensity (..),
     intensityToText,
+    addExercise,
     ExerciseWithIntensity (..),
     ExerciseNameWithIntensity (..),
     SorenessValue (..),
     Soreness (..),
     DatabaseF (..),
     emptyDatabase,
+    addSoreness,
     Database,
     exercisesByName,
+    getHomeDbFile,
+    changeIntensity,
     readDatabase,
-    modifyDb,
-    modifyDb',
+    modifyExercise,
+    removeExercise,
+    retrieveExercise,
+    editExercise,
+    toggleExercise,
   )
 where
 
@@ -31,16 +38,18 @@ import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Aeson (FromJSON, ToJSON, eitherDecodeFileStrict, encodeFile)
 import Data.Bool (not)
-import Data.Foldable (Foldable)
-import Data.Function (($), (.))
+import Data.Eq ((/=), (==))
+import Data.Foldable (Foldable, find)
+import Data.Function (($))
 import Data.Functor (Functor, (<$>))
-import Data.List (sortBy)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map as Map
+import Data.List (filter, sortBy)
+import Data.List.NonEmpty qualified as NE
+import Data.Map qualified as Map
 import Data.Maybe (Maybe (Just, Nothing))
 import Data.Ord (comparing)
 import Data.Text (Text, pack, unpack)
 import Data.Text.IO (putStrLn)
+import Data.Time (getCurrentTime)
 import Data.Time.Clock (UTCTime)
 import Data.Traversable (Traversable (traverse))
 import GHC.Generics (Generic)
@@ -93,7 +102,7 @@ instance ToJSON Category
 allCategories :: [Category]
 allCategories = enumFromTo minBound maxBound
 
-newtype ExerciseName = ExerciseName {getName :: Text} deriving (Eq, Generic, Ord)
+newtype ExerciseName = ExerciseName {getName :: Text} deriving (Eq, Generic, Ord, Read)
 
 instance Show ExerciseName where
   show (ExerciseName n) = unpack n
@@ -193,14 +202,15 @@ instance FromJSON DatabaseWithExerciseNames
 
 instance ToJSON DatabaseWithExerciseNames
 
-getDbFile :: (MonadIO m) => m FilePath
-getDbFile = liftIO $ getUserDataFile "myocardio3" "myocardio.json"
+getHomeDbFile :: (MonadIO m) => m FilePath
+getHomeDbFile = liftIO $ getUserDataFile "myocardio3" "myocardio.json"
 
 type Database = DatabaseF (ExerciseWithIntensity Exercise)
 
-readDatabase :: (MonadIO m) => m Database
-readDatabase = do
-  dbFile <- getDbFile
+type DatabaseFile = FilePath
+
+readDatabase :: (MonadIO m) => DatabaseFile -> m Database
+readDatabase dbFile = do
   liftIO $ putStrLn $ "reading from db file " <> pack dbFile
   exists <- liftIO (doesFileExist dbFile)
   if not exists
@@ -224,19 +234,99 @@ readDatabase = do
                     }
                 )
 
-writeDatabase :: (MonadIO m) => Database -> m ()
-writeDatabase v =
+writeDatabase :: (MonadIO m) => DatabaseFile -> Database -> m ()
+writeDatabase dbFile v =
   let encodeDb :: DatabaseF (ExerciseWithIntensity Exercise) -> DatabaseWithExerciseNames
       encodeDb db = DatabaseWithExerciseNames $ (\exWithIn -> ExerciseNameWithIntensity ((.name) <$> exWithIn)) <$> db
-   in do
-        dbFile <- getDbFile
-        liftIO $ encodeFile dbFile (encodeDb v)
+   in liftIO $ encodeFile dbFile (encodeDb v)
 
-modifyDb :: (MonadIO m) => (Database -> Database) -> m Database
-modifyDb f = do
-  db <- readDatabase
-  writeDatabase (f db)
+modifyDb :: (MonadIO m) => DatabaseFile -> (Database -> Database) -> m Database
+modifyDb dbFile f = do
+  db <- readDatabase dbFile
+  writeDatabase dbFile (f db)
   pure (f db)
 
-modifyDb' :: (MonadIO m) => (Database -> Database) -> m ()
-modifyDb' = void . modifyDb
+modifyDb' :: (MonadIO m) => DatabaseFile -> (Database -> Database) -> m ()
+modifyDb' dbFile f = void (modifyDb dbFile f)
+
+removeExercise :: (MonadIO m) => DatabaseFile -> ExerciseName -> m ()
+removeExercise dbFile exerciseName =
+  let filterFromList = filter (\e -> e.exercise.name /= exerciseName)
+   in modifyDb' dbFile \db' ->
+        db'
+          { currentTraining = filterFromList db'.currentTraining,
+            pastExercises = filterFromList db'.pastExercises,
+            exercises = filter (\e -> e.name /= exerciseName) db'.exercises
+          }
+
+modifyExercise :: (MonadIO m) => DatabaseFile -> ExerciseName -> (Exercise -> Exercise) -> m ()
+modifyExercise dbFile originalExerciseName modifier = modifyDb' dbFile \db ->
+  let replaceOld exWithIn =
+        if exWithIn.exercise.name == originalExerciseName
+          then exWithIn {exercise = modifier exWithIn.exercise}
+          else exWithIn
+   in db
+        { exercises =
+            ( \e ->
+                if e.name == originalExerciseName
+                  then modifier e
+                  else e
+            )
+              <$> db.exercises,
+          currentTraining = replaceOld <$> db.currentTraining,
+          pastExercises = replaceOld <$> db.pastExercises
+        }
+
+editExercise :: (MonadIO m) => DatabaseFile -> ExerciseName -> Exercise -> m ()
+editExercise dbFile originalExerciseName newExercise = modifyDb' dbFile \db ->
+  let replaceOld exWithIn = if exWithIn.exercise.name == originalExerciseName then exWithIn {exercise = newExercise} else exWithIn
+   in db
+        { exercises = newExercise : filter (\e -> e.name /= originalExerciseName) db.exercises,
+          currentTraining = replaceOld <$> db.currentTraining,
+          pastExercises = replaceOld <$> db.pastExercises
+        }
+
+addExercise :: (MonadIO m) => DatabaseFile -> Exercise -> m ()
+addExercise dbFile newExercise = editExercise dbFile (ExerciseName "") newExercise
+
+retrieveExercise :: (MonadIO m) => DatabaseFile -> ExerciseName -> m (Maybe Exercise)
+retrieveExercise dbFile ename = do
+  db <- readDatabase dbFile
+  pure (find (\e -> e.name == ename) db.exercises)
+
+toggleExercise :: (MonadIO m) => DatabaseFile -> ExerciseName -> Intensity -> m ()
+toggleExercise dbFile ename intensity' = do
+  currentTime <- liftIO getCurrentTime
+  modifyDb' dbFile \db ->
+    case find (\e -> e.name == ename) db.exercises of
+      Nothing -> db
+      Just exercise' ->
+        case find (\exWithIn -> exWithIn.exercise.name == ename) db.currentTraining of
+          Nothing ->
+            db
+              { currentTraining =
+                  ExerciseWithIntensity
+                    { exercise = exercise',
+                      intensity = intensity',
+                      time = currentTime
+                    }
+                    : db.currentTraining
+              }
+          Just _ -> db {currentTraining = filter (\ewi -> ewi.exercise.name /= ename) db.currentTraining}
+
+changeIntensity :: (MonadIO m) => DatabaseFile -> ExerciseName -> Intensity -> m ()
+changeIntensity dbFile ename intensity' = modifyDb' dbFile \db ->
+  db
+    { currentTraining = (\exWithIn -> if exWithIn.exercise.name == ename then exWithIn {intensity = intensity'} else exWithIn) <$> db.currentTraining
+    }
+
+addSoreness :: (MonadIO m) => DatabaseFile -> Muscle -> SorenessValue -> m ()
+addSoreness dbFile muscle' soreness' = do
+  currentTime <- liftIO getCurrentTime
+  modifyDb' dbFile \db ->
+    db
+      { sorenessHistory = Soreness {time = currentTime, muscle = muscle', soreness = soreness'} : db.sorenessHistory
+      }
+
+commitWorkout :: (MonadIO m) => DatabaseFile -> m ()
+commitWorkout dbFile = modifyDb' dbFile \db -> db {currentTraining = [], pastExercises = db.currentTraining <> db.pastExercises}
