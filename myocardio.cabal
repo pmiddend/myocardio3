@@ -44,6 +44,7 @@ library
 executable myocardio-exe
   import: shared-properties, warnings
   main-is: Main.hs
+  other-modules: Views, Util
   hs-source-dirs: app
   default-language: GHC2021
   build-depends:
