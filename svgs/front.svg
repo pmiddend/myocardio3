@@ -41,14 +41,6 @@
      d="m 110.79693,299.04843 c 0.68077,18.71768 -4.15256,46.09201 -9.8939,68.51321 -5.986281,19.24802 -23.932131,37.9945 -40.652871,23.06233 -12.77949,-17.12084 -3.4904,-39.66818 0.80316,-58.20777 6.62954,-15.66279 12.85198,-40.48009 34.6637,-38.22145 5.483041,0.17265 11.412041,0.48 15.079911,4.85368 z" />
   <path
      style="fill:#ff0000;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
-     d="m 57.613959,400.74996 c -10.73124,6.73018 -12.53526,45.24669 -13.18408,68.72414 -1.33572,9.37427 0.76199,19.35191 10.08138,19.50468 6.11732,0.20664 13.79385,-1.6541 16.82173,-7.50377 3.26566,-7.80947 -0.0482,-16.69918 3.45299,-24.50762 2.72318,-8.84066 6.73117,-17.19274 9.70074,-25.94177 3.07152,-9.15292 3.08412,-21.04669 -4.98134,-27.70079 -5.97514,-4.56857 -15.08998,-6.20651 -21.89142,-2.57487 z"
-     id="WristFlexors-1" />
-  <path
-     style="fill:#ff0000;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
-     d="m 373.96841,400.31331 c 10.73124,6.73018 12.53526,45.24669 13.18408,68.72414 1.33572,9.37427 -0.76199,19.35191 -10.08138,19.50468 -6.11732,0.20664 -13.79385,-1.6541 -16.82173,-7.50377 -3.26566,-7.80947 0.0482,-16.69918 -3.45299,-24.50762 -2.72318,-8.84066 -6.73117,-17.19274 -9.70074,-25.94177 -3.07152,-9.15292 -3.08412,-21.04669 4.98134,-27.70079 5.97514,-4.56857 15.08998,-6.20651 21.89142,-2.57487 z"
-     id="WristFlexors-2" />
-  <path
-     style="fill:#ff0000;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
      d="m 176.1871,203.9773 c -25.68149,1.90524 -25.52063,19.01275 -30.8888,39.61012 -6.29028,18.54189 -6.45165,39.26466 0.37953,57.68319 15.74523,10.40516 38.00388,6.68329 54.29519,4.6621 17.46257,-10.55735 13.48183,-34.69112 16.01213,-52.10311 -0.34225,-16.85312 5.43006,-40.11812 -14.62807,-47.81569 -2.5157,-1.42747 -18.16527,-1.53452 -25.16998,-2.03661 z"
      id="Pecs-1" />
   <path
@@ -99,14 +91,6 @@
      style="fill:#ff0000;stroke:#000000;stroke-width:0.740594px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
      d="m 291.20647,737.06545 c 4.23078,19.88365 2.74172,41.77758 0.37924,62.10205 -1.52138,13.91016 -3.62631,27.70457 -4.31518,41.85254 -0.10075,9.74988 -2.98807,19.13383 -7.02683,25.34538 -1.87191,3.10524 -5.22689,4.26403 -6.88095,-0.0167 -1.75787,-3.9446 -2.22909,-9.06676 -1.94822,-13.98738 0.0707,-28.34207 -3.59202,-56.30181 -3.08612,-84.662 1.0474,-12.84402 5.29639,-25.19911 11.608,-31.49099 3.51451,-3.46263 7.94209,-3.28712 11.27006,0.85706 z"
      id="TibialisAnterior-2" />
-  <path
-     style="fill:#ff0000;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
-     d="m 172.93013,907.33448 c 2.25958,-13.70741 -18.3195,-24.41881 -27.47485,-13.47936 -6.61786,9.72914 6.56497,17.45677 15.24901,16.99543 4.14986,-0.2642 9.09106,-0.35684 12.22584,-3.51607 z"
-     id="Ankles-1" />
-  <path
-     style="fill:#ff0000;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
-     d="m 289.05589,896.64273 c -6.01576,-11.22071 -27.44791,-10.4031 -30.46056,2.66264 -0.80126,15.46199 25.79598,17.86519 29.40197,3.36983 0.27795,-2.02431 0.73769,-4.0157 1.05859,-6.03247 z"
-     id="Ankles-2" />
   <text
      xml:space="preserve"
      style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:26.6667px;line-height:1.25;font-family:'Averia Serif Libre';-inkscape-font-specification:'Averia Serif Libre';letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none"
@@ -151,16 +135,6 @@
        x="384.17737"
        y="330.297"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:26.6667px;font-family:sans-serif;-inkscape-font-specification:sans-serif">Biceps</tspan></text>
-  <text
-     xml:space="preserve"
-     style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:26.6667px;line-height:1.25;font-family:'Averia Serif Libre';-inkscape-font-specification:'Averia Serif Libre';letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none"
-     x="402.96234"
-     y="424.05133"
-     id="text5"><tspan
-       id="tspan5"
-       x="402.96234"
-       y="424.05133"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:26.6667px;font-family:sans-serif;-inkscape-font-specification:sans-serif">Wrist</tspan></text>
   <text
      xml:space="preserve"
      style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:26.6667px;line-height:1.25;font-family:'Averia Serif Libre';-inkscape-font-specification:'Averia Serif Libre';letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none"
@@ -215,16 +189,6 @@
        y="852.27252"
        style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:26.6667px;font-family:sans-serif;-inkscape-font-specification:sans-serif"
        id="tspan12">Anterior</tspan></text>
-  <text
-     xml:space="preserve"
-     style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:26.6667px;line-height:1.25;font-family:'Averia Serif Libre';-inkscape-font-specification:'Averia Serif Libre';letter-spacing:0px;word-spacing:0px;fill:#000000;fill-opacity:1;stroke:none"
-     x="304.28253"
-     y="911.38586"
-     id="text11"><tspan
-       id="tspan11"
-       x="304.28253"
-       y="911.38586"
-       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:26.6667px;font-family:sans-serif;-inkscape-font-specification:sans-serif">Ankles</tspan></text>
   <path
      style="fill:none;stroke:#000000;stroke-width:1px;stroke-linecap:butt;stroke-linejoin:miter;stroke-dasharray:2, 1;stroke-dashoffset:0;stroke-opacity:1"
      d="M 292.08018,164.4799 315.3055,149.37048"
