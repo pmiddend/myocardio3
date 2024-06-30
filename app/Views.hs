@@ -52,10 +52,11 @@ import Myocardio.Database
     ExerciseWithIntensity (exercise, intensity, time),
     FileReference (FileReference),
     Muscle,
-    Soreness (Soreness, muscle, soreness, time),
-    SorenessValue (LittleSore, NotSore, VerySore),
+    Soreness (muscle, soreness, time),
+    SorenessValue (LittleSore, VerySore),
     allCategories,
     allMuscles,
+    currentMuscleSoreness,
     exercises,
     intensityToText,
   )
@@ -76,7 +77,7 @@ data CurrentPage
   | PageStats
   | PageMuscle Muscle
   | PageExerciseDeletion ExerciseName
-  | PageExerciseList
+  | PageChooseExercise
   | PageExercises
   deriving (Eq, Show, Read)
 
@@ -85,7 +86,7 @@ pageToPath PageCurrent = "/"
 pageToPath PageStats = "/stats"
 pageToPath (PageExerciseDeletion name) = "/remove-exercise/" <> packShow name
 pageToPath PageExercises = "/exercises"
-pageToPath PageExerciseList = "/training"
+pageToPath PageChooseExercise = "/training"
 pageToPath (PageMuscle m) = "/training/" <> packShow m
 
 instance Parsable CurrentPage where
@@ -102,7 +103,7 @@ viewHeader currentPage =
   let allPages =
         [ PageDescription PageCurrent "basket" "Current",
           PageDescription PageStats "graph-up-arrow" "Stats",
-          PageDescription PageExerciseList "card-checklist" "Choose",
+          PageDescription PageChooseExercise "card-checklist" "Choose",
           PageDescription PageExercises "box2-heart" "Edit"
         ]
       viewItem :: PageDescription -> L.Html ()
@@ -164,13 +165,7 @@ sorenessValueToEmoji _otherSoreness = ""
 
 sorenessOutput :: Database -> L.Html ()
 sorenessOutput database = do
-  let muscleToSoreness :: Muscle -> Maybe Soreness
-      muscleToSoreness muscle' =
-        case maximumByMay (comparing (.time)) $ filter (\historyEntry -> historyEntry.muscle == muscle') database.sorenessHistory of
-          -- If the latest value is not sore, then don't display soreness at all.
-          Just (Soreness {soreness = NotSore}) -> Nothing
-          otherValue -> otherValue
-      sorenessToHtml :: Soreness -> L.Html ()
+  let sorenessToHtml :: Soreness -> L.Html ()
       sorenessToHtml soreness' = L.li_ $ L.form_ [L.action_ "/reset-soreness", L.method_ "post"] do
         L.input_ [L.type_ "hidden", L.name_ "muscle", L.value_ (packShow soreness'.muscle)]
         L.span_ [L.class_ "me-1"] (L.toHtml (sorenessValueToEmoji soreness'.soreness))
@@ -179,7 +174,7 @@ sorenessOutput database = do
           [L.type_ "submit", L.class_ "btn btn-link"]
           "Reset"
   L.div_ [L.id_ "soreness-output"] do
-    L.ul_ (mapM_ sorenessToHtml $ mapMaybe muscleToSoreness allMuscles)
+    L.ul_ (mapM_ sorenessToHtml $ mapMaybe (currentMuscleSoreness database) allMuscles)
 
 idCurrentWorkout :: HtmlId
 idCurrentWorkout = HtmlId "current-workout"
@@ -321,21 +316,6 @@ inCurrentTraining :: Database -> Muscle -> Bool
 inCurrentTraining db muscle =
   isJust (find (\ewi -> muscle `elem` ewi.exercise.muscles) db.currentTraining)
 
-viewExerciseListOverview :: Database -> L.Html ()
-viewExerciseListOverview database = do
-  let viewButtonClass muscle' =
-        if inCurrentTraining database muscle'
-          then "btn btn-secondary w-100"
-          else "btn btn-primary w-100"
-      viewButton :: Muscle -> L.Html ()
-      viewButton muscle' = do
-        L.a_ [L.href_ ("/training/" <> packShow muscle'), L.class_ (viewButtonClass muscle')] do
-          L.span_ $ L.toHtml (packShow muscle')
-      buttonArray :: [[Muscle]]
-      buttonArray = chunksOf 2 allMuscles
-  forM_ buttonArray \buttonList -> do
-    L.div_ [L.class_ "row mb-3"] (forM_ buttonList (L.div_ [L.class_ "col-6 text-center"] . viewButton))
-
 viewSingleExerciseInChooser :: UTCTime -> Database -> Muscle -> Exercise -> L.Html ()
 viewSingleExerciseInChooser currentTime database muscle' exercise =
   let lastExecutionOfThisExercise :: Maybe (ExerciseWithIntensity Exercise)
@@ -449,7 +429,34 @@ viewConcreteMuscleGroupExercises currentTime database muscle = do
 
 viewChoose :: Database -> L.Html ()
 viewChoose database = do
-  viewExerciseListOverview database
+  let viewButtonClass muscle' =
+        if inCurrentTraining database muscle'
+          then case currentMuscleSoreness database muscle' of
+            Nothing -> "btn btn-secondary w-100"
+            Just _ -> "btn btn-danger w-100"
+          else case currentMuscleSoreness database muscle' of
+            Nothing -> "btn btn-primary w-100"
+            Just _ -> "btn btn-warning w-100"
+      viewButton :: Muscle -> L.Html ()
+      viewButton muscle' = do
+        L.a_ [L.href_ ("/training/" <> packShow muscle'), L.class_ (viewButtonClass muscle')] do
+          L.span_ $ L.toHtml (packShow muscle')
+      buttonArray :: [[Muscle]]
+      buttonArray = chunksOf 2 allMuscles
+  forM_ buttonArray \buttonList -> do
+    L.div_ [L.class_ "row mb-3"] (forM_ buttonList (L.div_ [L.class_ "col-6 text-center"] . viewButton))
+  L.div_ [L.class_ "d-flex gap-3 mb-1"] do
+    L.button_ [L.type_ "button", L.class_ "btn btn-primary"] (L.span_ " ")
+    L.span_ (L.toHtml ("not in workout" :: Text))
+  L.div_ [L.class_ "d-flex gap-3 mb-1"] do
+    L.button_ [L.type_ "button", L.class_ "btn btn-secondary"] (L.span_ " ")
+    L.span_ (L.toHtml ("in workout" :: Text))
+  L.div_ [L.class_ "d-flex gap-3 mb-1"] do
+    L.button_ [L.type_ "button", L.class_ "btn btn-warning"] (L.span_ " ")
+    L.span_ (L.toHtml ("sore muscle" :: Text))
+  L.div_ [L.class_ "d-flex gap-3 mb-1"] do
+    L.button_ [L.type_ "button", L.class_ "btn btn-danger"] (L.span_ " ")
+    L.span_ (L.toHtml ("sore muscle in workout" :: Text))
 
 exerciseFormMusclesParam :: (IsString a) => a
 exerciseFormMusclesParam = "muscles"
@@ -671,7 +678,7 @@ viewPageCurrentHtml currentTime db = viewHtmlSkeleton PageCurrent $ do
   exerciseHistoryHtml currentTime db
 
 viewChooseOuter :: Database -> L.Html ()
-viewChooseOuter db = viewHtmlSkeleton PageExerciseList (viewChoose db)
+viewChooseOuter db = viewHtmlSkeleton PageChooseExercise (viewChoose db)
 
 viewExerciseDeletion :: ExerciseName -> L.Html ()
 viewExerciseDeletion exerciseName = viewHtmlSkeleton (PageExerciseDeletion exerciseName) do
