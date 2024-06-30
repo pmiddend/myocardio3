@@ -183,7 +183,8 @@ CLOCK: [2024-06-23 Sun 10:37]--[2024-06-23 Sun 17:30] =>  6:53
 - Who is this for? Me specifically
 - Explain how it works
 ** TODO Add static build artifacts
-** TODO Rethink some muscles — peroneals?
+** DONE Rethink some muscles — peroneals?
+CLOSED: [2024-06-30 Sun 11:02]
 ** TODO Soreness: just list of muscles with state on the right?
 ** TODO Server: Better Nix deployment
 :LOGBOOK:

@@ -76,7 +76,6 @@ data Muscle
   | Hamstrings
   | Calves
   | TibialisAnterior
-  | Peroneals
   deriving (Show, Eq, Generic, Enum, Bounded, Ord, Read)
 
 instance FromJSON Muscle
