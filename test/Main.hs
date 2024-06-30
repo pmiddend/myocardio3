@@ -59,7 +59,7 @@ unitTests =
         length contentsBefore.exercises @?= 2
 
         step "Adding to workout"
-        toggleExercise dbFile (ExerciseName "ex1") (Intensity "intense!")
+        toggleExercise dbFile (ExerciseName "ex1") (Just (Intensity "intense!"))
 
         contentsAfterToggle <- readDatabase dbFile
         -- be sure our data is still there

@@ -332,7 +332,7 @@ main = scotty 3000 do
 
   post "/toggle-exercise-in-workout" do
     exerciseName <- formParam "exercise-name"
-    intensity' <- formParam "intensity"
+    intensity' <- formParamMaybe "intensity"
 
     homeDbFile <- getDbFile
     toggleExercise homeDbFile exerciseName intensity'

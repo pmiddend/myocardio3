@@ -284,14 +284,14 @@ editExercise dbFile originalExerciseName newExercise = modifyDb' dbFile \db ->
         }
 
 addExercise :: (MonadIO m) => DatabaseFile -> Exercise -> m ()
-addExercise dbFile newExercise = editExercise dbFile (ExerciseName "") newExercise
+addExercise dbFile = editExercise dbFile (ExerciseName "")
 
 retrieveExercise :: (MonadIO m) => DatabaseFile -> ExerciseName -> m (Maybe Exercise)
 retrieveExercise dbFile ename = do
   db <- readDatabase dbFile
   pure (find (\e -> e.name == ename) db.exercises)
 
-toggleExercise :: (MonadIO m) => DatabaseFile -> ExerciseName -> Intensity -> m ()
+toggleExercise :: (MonadIO m) => DatabaseFile -> ExerciseName -> Maybe Intensity -> m ()
 toggleExercise dbFile ename intensity' = do
   currentTime <- liftIO getCurrentTime
   modifyDb' dbFile \db ->
@@ -300,15 +300,18 @@ toggleExercise dbFile ename intensity' = do
       Just exercise' ->
         case find (\exWithIn -> exWithIn.exercise.name == ename) db.currentTraining of
           Nothing ->
-            db
-              { currentTraining =
-                  ExerciseWithIntensity
-                    { exercise = exercise',
-                      intensity = intensity',
-                      time = currentTime
-                    }
-                    : db.currentTraining
-              }
+            case intensity' of
+              Nothing -> db
+              Just intensity'' ->
+                db
+                  { currentTraining =
+                      ExerciseWithIntensity
+                        { exercise = exercise',
+                          intensity = intensity'',
+                          time = currentTime
+                        }
+                        : db.currentTraining
+                  }
           Just _ -> db {currentTraining = filter (\ewi -> ewi.exercise.name /= ename) db.currentTraining}
 
 changeIntensity :: (MonadIO m) => DatabaseFile -> ExerciseName -> Intensity -> m ()
