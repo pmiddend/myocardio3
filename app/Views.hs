@@ -76,7 +76,7 @@ data CurrentPage
   | PageStats
   | PageMuscle Muscle
   | PageExerciseDeletion ExerciseName
-  | PageExerciseList
+  | PageChooseExercise
   | PageExercises
   deriving (Eq, Show, Read)
 
@@ -85,7 +85,7 @@ pageToPath PageCurrent = "/"
 pageToPath PageStats = "/stats"
 pageToPath (PageExerciseDeletion name) = "/remove-exercise/" <> packShow name
 pageToPath PageExercises = "/exercises"
-pageToPath PageExerciseList = "/training"
+pageToPath PageChooseExercise = "/training"
 pageToPath (PageMuscle m) = "/training/" <> packShow m
 
 instance Parsable CurrentPage where
@@ -102,7 +102,7 @@ viewHeader currentPage =
   let allPages =
         [ PageDescription PageCurrent "basket" "Current",
           PageDescription PageStats "graph-up-arrow" "Stats",
-          PageDescription PageExerciseList "card-checklist" "Choose",
+          PageDescription PageChooseExercise "card-checklist" "Choose",
           PageDescription PageExercises "box2-heart" "Edit"
         ]
       viewItem :: PageDescription -> L.Html ()
@@ -321,21 +321,6 @@ inCurrentTraining :: Database -> Muscle -> Bool
 inCurrentTraining db muscle =
   isJust (find (\ewi -> muscle `elem` ewi.exercise.muscles) db.currentTraining)
 
-viewExerciseListOverview :: Database -> L.Html ()
-viewExerciseListOverview database = do
-  let viewButtonClass muscle' =
-        if inCurrentTraining database muscle'
-          then "btn btn-secondary w-100"
-          else "btn btn-primary w-100"
-      viewButton :: Muscle -> L.Html ()
-      viewButton muscle' = do
-        L.a_ [L.href_ ("/training/" <> packShow muscle'), L.class_ (viewButtonClass muscle')] do
-          L.span_ $ L.toHtml (packShow muscle')
-      buttonArray :: [[Muscle]]
-      buttonArray = chunksOf 2 allMuscles
-  forM_ buttonArray \buttonList -> do
-    L.div_ [L.class_ "row mb-3"] (forM_ buttonList (L.div_ [L.class_ "col-6 text-center"] . viewButton))
-
 viewSingleExerciseInChooser :: UTCTime -> Database -> Muscle -> Exercise -> L.Html ()
 viewSingleExerciseInChooser currentTime database muscle' exercise =
   let lastExecutionOfThisExercise :: Maybe (ExerciseWithIntensity Exercise)
@@ -449,7 +434,18 @@ viewConcreteMuscleGroupExercises currentTime database muscle = do
 
 viewChoose :: Database -> L.Html ()
 viewChoose database = do
-  viewExerciseListOverview database
+  let viewButtonClass muscle' =
+        if inCurrentTraining database muscle'
+          then "btn btn-secondary w-100"
+          else "btn btn-primary w-100"
+      viewButton :: Muscle -> L.Html ()
+      viewButton muscle' = do
+        L.a_ [L.href_ ("/training/" <> packShow muscle'), L.class_ (viewButtonClass muscle')] do
+          L.span_ $ L.toHtml (packShow muscle')
+      buttonArray :: [[Muscle]]
+      buttonArray = chunksOf 2 allMuscles
+  forM_ buttonArray \buttonList -> do
+    L.div_ [L.class_ "row mb-3"] (forM_ buttonList (L.div_ [L.class_ "col-6 text-center"] . viewButton))
 
 exerciseFormMusclesParam :: (IsString a) => a
 exerciseFormMusclesParam = "muscles"
@@ -671,7 +667,7 @@ viewPageCurrentHtml currentTime db = viewHtmlSkeleton PageCurrent $ do
   exerciseHistoryHtml currentTime db
 
 viewChooseOuter :: Database -> L.Html ()
-viewChooseOuter db = viewHtmlSkeleton PageExerciseList (viewChoose db)
+viewChooseOuter db = viewHtmlSkeleton PageChooseExercise (viewChoose db)
 
 viewExerciseDeletion :: ExerciseName -> L.Html ()
 viewExerciseDeletion exerciseName = viewHtmlSkeleton (PageExerciseDeletion exerciseName) do
