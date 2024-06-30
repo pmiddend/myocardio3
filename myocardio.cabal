@@ -36,6 +36,7 @@ library
     , time
     , xdg-basedir
     , directory
+    , safe
     , containers
     , directory
   hs-source-dirs:   lib

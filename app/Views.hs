@@ -52,10 +52,11 @@ import Myocardio.Database
     ExerciseWithIntensity (exercise, intensity, time),
     FileReference (FileReference),
     Muscle,
-    Soreness (Soreness, muscle, soreness, time),
-    SorenessValue (LittleSore, NotSore, VerySore),
+    Soreness (muscle, soreness, time),
+    SorenessValue (LittleSore, VerySore),
     allCategories,
     allMuscles,
+    currentMuscleSoreness,
     exercises,
     intensityToText,
   )
@@ -164,13 +165,7 @@ sorenessValueToEmoji _otherSoreness = ""
 
 sorenessOutput :: Database -> L.Html ()
 sorenessOutput database = do
-  let muscleToSoreness :: Muscle -> Maybe Soreness
-      muscleToSoreness muscle' =
-        case maximumByMay (comparing (.time)) $ filter (\historyEntry -> historyEntry.muscle == muscle') database.sorenessHistory of
-          -- If the latest value is not sore, then don't display soreness at all.
-          Just (Soreness {soreness = NotSore}) -> Nothing
-          otherValue -> otherValue
-      sorenessToHtml :: Soreness -> L.Html ()
+  let sorenessToHtml :: Soreness -> L.Html ()
       sorenessToHtml soreness' = L.li_ $ L.form_ [L.action_ "/reset-soreness", L.method_ "post"] do
         L.input_ [L.type_ "hidden", L.name_ "muscle", L.value_ (packShow soreness'.muscle)]
         L.span_ [L.class_ "me-1"] (L.toHtml (sorenessValueToEmoji soreness'.soreness))
@@ -179,7 +174,7 @@ sorenessOutput database = do
           [L.type_ "submit", L.class_ "btn btn-link"]
           "Reset"
   L.div_ [L.id_ "soreness-output"] do
-    L.ul_ (mapM_ sorenessToHtml $ mapMaybe muscleToSoreness allMuscles)
+    L.ul_ (mapM_ sorenessToHtml $ mapMaybe (currentMuscleSoreness database) allMuscles)
 
 idCurrentWorkout :: HtmlId
 idCurrentWorkout = HtmlId "current-workout"
@@ -436,8 +431,12 @@ viewChoose :: Database -> L.Html ()
 viewChoose database = do
   let viewButtonClass muscle' =
         if inCurrentTraining database muscle'
-          then "btn btn-secondary w-100"
-          else "btn btn-primary w-100"
+          then case currentMuscleSoreness database muscle' of
+            Nothing -> "btn btn-secondary w-100"
+            Just _ -> "btn btn-danger w-100"
+          else case currentMuscleSoreness database muscle' of
+            Nothing -> "btn btn-primary w-100"
+            Just _ -> "btn btn-warning w-100"
       viewButton :: Muscle -> L.Html ()
       viewButton muscle' = do
         L.a_ [L.href_ ("/training/" <> packShow muscle'), L.class_ (viewButtonClass muscle')] do
@@ -446,6 +445,18 @@ viewChoose database = do
       buttonArray = chunksOf 2 allMuscles
   forM_ buttonArray \buttonList -> do
     L.div_ [L.class_ "row mb-3"] (forM_ buttonList (L.div_ [L.class_ "col-6 text-center"] . viewButton))
+  L.div_ [L.class_ "d-flex gap-3 mb-1"] do
+    L.button_ [L.type_ "button", L.class_ "btn btn-primary"] (L.span_ " ")
+    L.span_ (L.toHtml ("not in workout" :: Text))
+  L.div_ [L.class_ "d-flex gap-3 mb-1"] do
+    L.button_ [L.type_ "button", L.class_ "btn btn-secondary"] (L.span_ " ")
+    L.span_ (L.toHtml ("in workout" :: Text))
+  L.div_ [L.class_ "d-flex gap-3 mb-1"] do
+    L.button_ [L.type_ "button", L.class_ "btn btn-warning"] (L.span_ " ")
+    L.span_ (L.toHtml ("sore muscle" :: Text))
+  L.div_ [L.class_ "d-flex gap-3 mb-1"] do
+    L.button_ [L.type_ "button", L.class_ "btn btn-danger"] (L.span_ " ")
+    L.span_ (L.toHtml ("sore muscle in workout" :: Text))
 
 exerciseFormMusclesParam :: (IsString a) => a
 exerciseFormMusclesParam = "muscles"

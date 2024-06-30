@@ -8,6 +8,7 @@ module Myocardio.Database
     Category (..),
     allCategories,
     Exercise (..),
+    currentMuscleSoreness,
     FileReference (..),
     ExerciseName (..),
     commitWorkout,
@@ -53,6 +54,7 @@ import Data.Time (getCurrentTime)
 import Data.Time.Clock (UTCTime)
 import Data.Traversable (Traversable (traverse))
 import GHC.Generics (Generic)
+import Safe (maximumByMay)
 import System.Directory (doesFileExist)
 import System.Environment.XDG.BaseDir (getUserDataFile)
 import System.IO (FilePath)
@@ -330,3 +332,10 @@ addSoreness dbFile muscle' soreness' = do
 
 commitWorkout :: (MonadIO m) => DatabaseFile -> m ()
 commitWorkout dbFile = modifyDb' dbFile \db -> db {currentTraining = [], pastExercises = db.currentTraining <> db.pastExercises}
+
+currentMuscleSoreness :: Database -> Muscle -> Maybe Soreness
+currentMuscleSoreness db muscle =
+  case maximumByMay (comparing (.time)) $ filter (\historyEntry -> historyEntry.muscle == muscle) db.sorenessHistory of
+    -- If the latest value is not sore, then don't display soreness at all.
+    Just (Soreness {soreness = NotSore}) -> Nothing
+    otherValue -> otherValue
