@@ -290,7 +290,7 @@ viewCurrentWorkout database =
                 L.form_ [L.action_ "/change-intensity", L.method_ "post"] do
                   L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.exercise.name)]
                   L.input_
-                    [ L.class_ "form-control mb-1",
+                    [ L.class_ "form-control form-control-sm mb-1",
                       L.value_ (intensityToText exWithIn.intensity),
                       L.name_ "intensity",
                       L.type_ "text"
@@ -306,7 +306,7 @@ viewCurrentWorkout database =
         L.form_ [L.action_ "/commit-workout", L.method_ "post"] do
           L.button_
             [ L.type_ "submit",
-              L.class_ "btn btn-primary"
+              L.class_ "btn btn-success"
             ]
             do
               iconHtml "send"

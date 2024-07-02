@@ -178,6 +178,15 @@ CLOCK: [2024-06-26 Wed 06:52]--[2024-06-26 Wed 09:08] =>  2:16
 CLOCK: [2024-06-24 Mon 13:14]--[2024-06-24 Mon 14:01] =>  0:47
 CLOCK: [2024-06-23 Sun 10:37]--[2024-06-23 Sun 17:30] =>  6:53
 :END:
+** TODO History per muscle
+
+- Select muscle
+- Show a list like this
+  + 2024-05-10: exercise 1 intensity 1, exercise 2, intensity 2
+    * ⇒ 3 days of soreness
+  + 2024-05-01: exercise 1 intensity 1, exercise 2, intensity 2
+    * ⇒ no soreness
+  + ...
 ** TODO Write a README with instructions
 
 - Who is this for? Me specifically
