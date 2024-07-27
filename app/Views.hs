@@ -29,7 +29,7 @@ import Data.Foldable (Foldable (elem, length), find, forM_, mapM_)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
 import Data.Int (Int)
-import Data.List (filter, reverse, sortBy, zip)
+import Data.List (filter, reverse, sortBy, sortOn, zip)
 import Data.List.NonEmpty qualified as NE
 import Data.List.Split (chunksOf)
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, isJust, isNothing, mapMaybe, maybe)
@@ -41,6 +41,7 @@ import Data.String (IsString)
 import Data.Text (Text, pack, replace)
 import Data.Time (Day (ModifiedJulianDay))
 import Data.Time.Clock (UTCTime (utctDay, utctDayTime), diffUTCTime, nominalDay)
+import Data.Time.Format (defaultTimeLocale, formatTime)
 import Lucid qualified as L
 import Lucid.Base (makeAttributes)
 import Myocardio.Database
@@ -60,7 +61,7 @@ import Myocardio.Database
     exercises,
     intensityToText,
   )
-import Safe (maximumByMay)
+import Safe (lastMay, maximumByMay)
 import Text.Read (Read)
 import Util (packShow)
 import Web.Scotty (Parsable (parseParam), readEither)
@@ -318,9 +319,11 @@ inCurrentTraining db muscle =
 
 viewSingleExerciseInChooser :: UTCTime -> Database -> Muscle -> Exercise -> L.Html ()
 viewSingleExerciseInChooser currentTime database muscle' exercise =
-  let lastExecutionOfThisExercise :: Maybe (ExerciseWithIntensity Exercise)
+  let allExecutionsOfThisExercise :: [ExerciseWithIntensity Exercise]
+      allExecutionsOfThisExercise = sortOn (.time) $ filter (\pe -> pe.exercise.name == exercise.name) database.pastExercises
+      lastExecutionOfThisExercise :: Maybe (ExerciseWithIntensity Exercise)
       lastExecutionOfThisExercise =
-        maximumByMay (comparing (.time)) $ filter (\pe -> pe.exercise.name == exercise.name) database.pastExercises
+        lastMay allExecutionsOfThisExercise
       beginningOfDayAfterExecution :: Maybe UTCTime
       beginningOfDayAfterExecution =
         (\x -> x.time {utctDay = succ x.time.utctDay, utctDayTime = 1}) <$> lastExecutionOfThisExercise
@@ -352,6 +355,17 @@ viewSingleExerciseInChooser currentTime database muscle' exercise =
                 case firstSorenessBetweenExecutions of
                   Nothing -> L.span_ "No soreness."
                   Just lastSoreness -> L.span_ $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji lastSoreness.soreness
+                L.br_ []
+                L.table_ [L.class_ "table table-sm"] do
+                  L.thead_ do
+                    L.tr_ do
+                      L.th_ "When"
+                      L.th_ "Comment"
+                  L.tbody_ do
+                    forM_ allExecutionsOfThisExercise \execution ->
+                      L.tr_ do
+                        L.td_ [L.class_ "text-nowrap"] $ L.toHtml $ pack $ formatTime defaultTimeLocale "%F" execution.time
+                        L.td_ (L.toHtml (intensityToText execution.intensity))
    in L.form_ [L.method_ "post", L.action_ "/toggle-exercise-in-workout"] do
         L.input_
           [ L.type_ "hidden",
