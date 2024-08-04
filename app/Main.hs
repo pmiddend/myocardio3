@@ -338,7 +338,8 @@ main = do
       intensity' <- formParamMaybe "intensity"
 
       homeDbFile <- getDbFile
-      toggleExercise homeDbFile exerciseName intensity'
+      currentTime <- liftIO getCurrentTime
+      toggleExercise homeDbFile currentTime exerciseName intensity'
       returnToCurrent :: Maybe Bool <- formParamMaybe "return-to-current"
       redirect case returnToCurrent of
         Nothing ->
@@ -357,14 +358,16 @@ main = do
       howSore' <- formParam "how-sore"
 
       homeDbFile <- getDbFile
-      addSoreness homeDbFile muscle' howSore'
+      currentTime <- liftIO getCurrentTime
+      addSoreness homeDbFile currentTime muscle' howSore'
 
       redirect "/"
 
     post "/reset-soreness" do
       muscle' <- formParam "muscle"
       homeDbFile <- getDbFile
-      addSoreness homeDbFile muscle' NotSore
+      currentTime <- liftIO getCurrentTime
+      addSoreness homeDbFile currentTime muscle' NotSore
       redirect "/"
 
     post "/commit-workout" do

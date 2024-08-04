@@ -50,7 +50,6 @@ import Data.Maybe (Maybe (Just, Nothing))
 import Data.Ord (comparing)
 import Data.Text (Text, pack, unpack)
 import Data.Text.IO (putStrLn)
-import Data.Time (getCurrentTime)
 import Data.Time.Clock (UTCTime)
 import Data.Traversable (Traversable (traverse))
 import GHC.Generics (Generic)
@@ -293,9 +292,8 @@ retrieveExercise dbFile ename = do
   db <- readDatabase dbFile
   pure (find (\e -> e.name == ename) db.exercises)
 
-toggleExercise :: (MonadIO m) => DatabaseFile -> ExerciseName -> Maybe Intensity -> m ()
-toggleExercise dbFile ename intensity' = do
-  currentTime <- liftIO getCurrentTime
+toggleExercise :: (MonadIO m) => DatabaseFile -> UTCTime -> ExerciseName -> Maybe Intensity -> m ()
+toggleExercise dbFile currentTime ename intensity' =
   modifyDb' dbFile \db ->
     case find (\e -> e.name == ename) db.exercises of
       Nothing -> db
@@ -322,9 +320,8 @@ changeIntensity dbFile ename intensity' = modifyDb' dbFile \db ->
     { currentTraining = (\exWithIn -> if exWithIn.exercise.name == ename then exWithIn {intensity = intensity'} else exWithIn) <$> db.currentTraining
     }
 
-addSoreness :: (MonadIO m) => DatabaseFile -> Muscle -> SorenessValue -> m ()
-addSoreness dbFile muscle' soreness' = do
-  currentTime <- liftIO getCurrentTime
+addSoreness :: (MonadIO m) => DatabaseFile -> UTCTime -> Muscle -> SorenessValue -> m ()
+addSoreness dbFile currentTime muscle' soreness' =
   modifyDb' dbFile \db ->
     db
       { sorenessHistory = Soreness {time = currentTime, muscle = muscle', soreness = soreness'} : db.sorenessHistory
