@@ -254,6 +254,42 @@ viewExerciseImageCarousel exercise = do
           ]
           (L.span_ [L.class_ "carousel-control-next-icon"] mempty)
 
+viewSingleExerciseInCurrentWorkout :: ExerciseWithIntensity Exercise -> L.Html ()
+viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
+  viewExerciseImageCarousel exWithIn.exercise
+  L.div_ [L.class_ "card-body"] do
+    L.h5_ [L.class_ "card-title"] do
+      L.strong_ (L.toHtml (packShow exWithIn.exercise.name))
+    L.h6_ [L.class_ "card-subtitle"] do
+      "Intensity: " <> L.strong_ (L.toHtml (intensityToText exWithIn.intensity))
+    L.p_ [L.class_ "card-text text-info"] do
+      L.toHtmlRaw $ commonmarkToHtml [] [] exWithIn.exercise.description
+      L.form_ [L.action_ "/toggle-exercise-in-workout", L.method_ "post"] do
+        L.input_ [L.type_ "hidden", L.name_ "return-to-current", L.value_ (packShow True)]
+        L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.exercise.name)]
+        L.button_
+          [ L.type_ "submit",
+            L.class_ "btn btn-secondary btn-sm"
+          ]
+          do
+            iconHtml "trash"
+            L.span_ "Remove from workout"
+      L.form_ [L.action_ "/change-intensity", L.method_ "post"] do
+        L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.exercise.name)]
+        L.input_
+          [ L.class_ "form-control form-control-sm mb-1",
+            L.value_ (intensityToText exWithIn.intensity),
+            L.name_ "intensity",
+            L.type_ "text"
+          ]
+        L.button_
+          [ L.type_ "submit",
+            L.class_ "btn btn-sm btn-primary"
+          ]
+          do
+            iconHtml "send"
+            L.span_ "Change intensity"
+
 viewCurrentWorkout :: Database -> L.Html ()
 viewCurrentWorkout database =
   L.div_ [makeId idCurrentWorkout] do
@@ -271,41 +307,10 @@ viewCurrentWorkout database =
         L.div_ [L.class_ "gap-1 mb-3"] do
           L.span_ [L.class_ "text-muted me-1"] "Missing: "
           forM_ musclesMissing \muscle' -> L.span_ [L.class_ "badge text-bg-warning me-1"] (L.toHtml $ packShow muscle')
-        forM_ currentExercises \exWithIn -> do
-          L.div_ [L.class_ "mb-3 card"] do
-            viewExerciseImageCarousel exWithIn.exercise
-            L.div_ [L.class_ "card-body"] do
-              L.h5_ [L.class_ "card-title"] do
-                L.strong_ (L.toHtml (packShow exWithIn.exercise.name))
-              L.h6_ [L.class_ "card-subtitle"] do
-                "Intensity: " <> L.strong_ (L.toHtml (intensityToText exWithIn.intensity))
-              L.p_ [L.class_ "card-text text-info"] do
-                L.toHtmlRaw $ commonmarkToHtml [] [] exWithIn.exercise.description
-                L.form_ [L.action_ "/toggle-exercise-in-workout", L.method_ "post"] do
-                  L.input_ [L.type_ "hidden", L.name_ "return-to-current", L.value_ (packShow True)]
-                  L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.exercise.name)]
-                  L.button_
-                    [ L.type_ "submit",
-                      L.class_ "btn btn-secondary btn-sm"
-                    ]
-                    do
-                      iconHtml "trash"
-                      L.span_ "Remove from workout"
-                L.form_ [L.action_ "/change-intensity", L.method_ "post"] do
-                  L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.exercise.name)]
-                  L.input_
-                    [ L.class_ "form-control form-control-sm mb-1",
-                      L.value_ (intensityToText exWithIn.intensity),
-                      L.name_ "intensity",
-                      L.type_ "text"
-                    ]
-                  L.button_
-                    [ L.type_ "submit",
-                      L.class_ "btn btn-sm btn-primary"
-                    ]
-                    do
-                      iconHtml "send"
-                      L.span_ "Change intensity"
+        forM_ (chunksOf 2 currentExercises) \exerciseRow -> do
+          L.div_ [L.class_ "row"] do
+            forM_ exerciseRow \exerciseInRow ->
+              L.div_ [L.class_ "col-lg-6 col-12"] (viewSingleExerciseInCurrentWorkout exerciseInRow)
 
         L.form_ [L.action_ "/commit-workout", L.method_ "post"] do
           L.button_
