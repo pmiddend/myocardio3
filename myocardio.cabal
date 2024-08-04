@@ -1,6 +1,6 @@
 cabal-version:  2.2
 name:           myocardio
-version:        3.0.0
+version:        3.1.0
 description:    Please see the README on GitHub at <https://github.com/pmiddend/myocardio#readme>
 homepage:       https://github.com/pmiddend/myocardio#readme
 bug-reports:    https://github.com/pmiddend/myocardio/issues
