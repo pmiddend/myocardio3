@@ -7,6 +7,9 @@ module Myocardio.Database
     Muscle (..),
     Category (..),
     allCategories,
+    firstSorenessBetweenExecutions,
+    allExecutionsOfExercise,
+    nextExerciseAfterThisContainingMuscle,
     Exercise (..),
     currentMuscleSoreness,
     FileReference (..),
@@ -35,29 +38,29 @@ module Myocardio.Database
   )
 where
 
-import Control.Monad (void)
+import Control.Monad (Monad ((>>=)), void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Aeson (FromJSON, ToJSON, eitherDecodeFileStrict, encodeFile)
-import Data.Bool (not)
+import Data.Bool (Bool (True), not, (&&))
 import Data.Eq ((/=), (==))
-import Data.Foldable (Foldable, find)
+import Data.Foldable (Foldable (elem), find)
 import Data.Function (($))
 import Data.Functor (Functor, (<$>))
-import Data.List (filter, sortBy)
+import Data.List (filter, sortBy, sortOn)
 import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as Map
 import Data.Maybe (Maybe (Just, Nothing))
-import Data.Ord (comparing)
+import Data.Ord (Ord ((<), (>)), comparing)
 import Data.Text (Text, pack, unpack)
 import Data.Text.IO (putStrLn)
-import Data.Time.Clock (UTCTime)
+import Data.Time.Clock (UTCTime (utctDay, utctDayTime))
 import Data.Traversable (Traversable (traverse))
 import GHC.Generics (Generic)
-import Safe (maximumByMay)
+import Safe (lastMay, maximumByMay)
 import System.Directory (doesFileExist)
 import System.Environment.XDG.BaseDir (getUserDataFile)
 import System.IO (FilePath)
-import Prelude (Applicative (pure), Bounded, Either (Left, Right), Enum, Eq, Ord, Read, Semigroup ((<>)), Show (show), enumFromTo, error, maxBound, minBound)
+import Prelude (Applicative (pure), Bounded, Either (Left, Right), Enum (succ), Eq, Read, Semigroup ((<>)), Show (show), enumFromTo, error, maxBound, minBound)
 
 data Muscle
   = Neck
@@ -336,3 +339,43 @@ currentMuscleSoreness db muscle =
     -- If the latest value is not sore, then don't display soreness at all.
     Just (Soreness {soreness = NotSore}) -> Nothing
     otherValue -> otherValue
+
+allExecutionsOfExercise :: Database -> Exercise -> [ExerciseWithIntensity Exercise]
+allExecutionsOfExercise database exercise = sortOn (.time) $ filter (\pe -> pe.exercise.name == exercise.name) database.pastExercises
+
+firstSorenessBetweenExecutions :: Database -> Muscle -> ExerciseName -> Maybe Soreness
+firstSorenessBetweenExecutions db muscle exercise =
+  let allExecutionsOfThisExercise :: [ExerciseWithIntensity Exercise]
+      allExecutionsOfThisExercise = sortOn (.time) $ filter (\pe -> pe.exercise.name == exercise) db.pastExercises
+      beginningOfDayAfterExecution :: Maybe UTCTime
+      beginningOfDayAfterExecution =
+        (\x -> x.time {utctDay = succ x.time.utctDay, utctDayTime = 1}) <$> lastExecutionOfThisExercise
+      nextExerciseAfterThisContainingThisMuscle :: Maybe (ExerciseWithIntensity Exercise)
+      nextExerciseAfterThisContainingThisMuscle =
+        beginningOfDayAfterExecution >>= \x -> find (\e -> e.time > x && muscle `elem` e.exercise.muscles) db.pastExercises
+      lastExecutionOfThisExercise :: Maybe (ExerciseWithIntensity Exercise)
+      lastExecutionOfThisExercise =
+        lastMay allExecutionsOfThisExercise
+   in case lastExecutionOfThisExercise of
+        Nothing -> Nothing
+        Just lastExecutionInstance ->
+          find
+            ( \soreness' ->
+                soreness'.time
+                  > lastExecutionInstance.time
+                  && soreness'.muscle
+                    == muscle
+                  && case nextExerciseAfterThisContainingThisMuscle of
+                    Nothing -> True
+                    Just nextExercise ->
+                      soreness'.time < nextExercise.time
+            )
+            db.sorenessHistory
+
+nextExerciseAfterThisContainingMuscle :: Database -> Exercise -> Muscle -> Maybe (ExerciseWithIntensity Exercise)
+nextExerciseAfterThisContainingMuscle database exercise muscle =
+  let lastExecutionOfThisExercise = lastMay (allExecutionsOfExercise database exercise)
+      beginningOfDayAfterExecution :: Maybe UTCTime
+      beginningOfDayAfterExecution =
+        (\x -> x.time {utctDay = succ x.time.utctDay, utctDayTime = 1}) <$> lastExecutionOfThisExercise
+   in beginningOfDayAfterExecution >>= \x -> find (\e -> e.time > x && muscle `elem` e.exercise.muscles) database.pastExercises
