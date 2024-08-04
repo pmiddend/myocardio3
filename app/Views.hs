@@ -424,7 +424,10 @@ viewConcreteMuscleGroupExercises currentTime database muscle = do
       L.div_ do
         lastTraining muscle
         L.div_ do
-          forM_ exercisesForThisMuscle (viewSingleExerciseInChooser currentTime database muscle)
+          forM_ (chunksOf 2 exercisesForThisMuscle) \exerciseRow -> do
+            L.div_ [L.class_ "row"] do
+              forM_ exerciseRow \exerciseInRow ->
+                L.div_ [L.class_ "col-lg-6 col-12"] (viewSingleExerciseInChooser currentTime database muscle exerciseInRow)
 
 viewChoose :: Database -> L.Html ()
 viewChoose database = do
