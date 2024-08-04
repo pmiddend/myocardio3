@@ -89,4 +89,4 @@ test-suite myocardio-tests
     directory,
     safe,
     filepath,
-    tasty-quickcheck
+    time

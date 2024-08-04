@@ -29,43 +29,46 @@ import Data.Foldable (Foldable (elem, length), find, forM_, mapM_)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
 import Data.Int (Int)
-import Data.List (filter, reverse, sortBy, sortOn, zip)
+import Data.List (filter, reverse, sortBy, zip)
 import Data.List.NonEmpty qualified as NE
 import Data.List.Split (chunksOf)
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, isJust, isNothing, mapMaybe, maybe)
 import Data.Monoid (Monoid (mempty))
-import Data.Ord (Ord ((<), (<=), (>)), comparing)
+import Data.Ord (Ord ((<=)), comparing)
 import Data.Semigroup (Semigroup ((<>)))
 import Data.Set qualified as Set
 import Data.String (IsString)
 import Data.Text (Text, pack, replace)
 import Data.Time (Day (ModifiedJulianDay))
-import Data.Time.Clock (UTCTime (utctDay, utctDayTime), diffUTCTime, nominalDay)
+import Data.Time.Clock (UTCTime (utctDay), diffUTCTime, nominalDay)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Lucid qualified as L
 import Lucid.Base (makeAttributes)
 import Myocardio.Database
   ( Category (Strength),
     Database,
-    DatabaseF (currentTraining, pastExercises, sorenessHistory),
+    DatabaseF (currentTraining, pastExercises),
     Exercise (Exercise, category, description, fileReferences, muscles, name),
     ExerciseName,
     ExerciseWithIntensity (exercise, intensity, time),
     FileReference (FileReference),
     Muscle,
-    Soreness (muscle, soreness, time),
+    Soreness (muscle, soreness),
     SorenessValue (LittleSore, VerySore),
     allCategories,
+    allExecutionsOfExercise,
     allMuscles,
     currentMuscleSoreness,
     exercises,
+    firstSorenessBetweenExecutions,
     intensityToText,
+    nextExerciseAfterThisContainingMuscle,
   )
 import Safe (lastMay, maximumByMay)
 import Text.Read (Read)
 import Util (packShow)
 import Web.Scotty (Parsable (parseParam), readEither)
-import Prelude (Enum (succ), Fractional ((/)), RealFrac (round), Show)
+import Prelude (Fractional ((/)), RealFrac (round), Show)
 
 iconHtml :: Text -> L.Html ()
 iconHtml name' = L.i_ [L.class_ ("bi-" <> name' <> " me-2")] mempty
@@ -320,52 +323,34 @@ inCurrentTraining db muscle =
 viewSingleExerciseInChooser :: UTCTime -> Database -> Muscle -> Exercise -> L.Html ()
 viewSingleExerciseInChooser currentTime database muscle' exercise =
   let allExecutionsOfThisExercise :: [ExerciseWithIntensity Exercise]
-      allExecutionsOfThisExercise = sortOn (.time) $ filter (\pe -> pe.exercise.name == exercise.name) database.pastExercises
+      allExecutionsOfThisExercise = allExecutionsOfExercise database exercise
       lastExecutionOfThisExercise :: Maybe (ExerciseWithIntensity Exercise)
       lastExecutionOfThisExercise =
         lastMay allExecutionsOfThisExercise
-      beginningOfDayAfterExecution :: Maybe UTCTime
-      beginningOfDayAfterExecution =
-        (\x -> x.time {utctDay = succ x.time.utctDay, utctDayTime = 1}) <$> lastExecutionOfThisExercise
       nextExerciseAfterThisContainingThisMuscle :: Maybe (ExerciseWithIntensity Exercise)
-      nextExerciseAfterThisContainingThisMuscle =
-        beginningOfDayAfterExecution >>= \x -> find (\e -> e.time > x && muscle' `elem` e.exercise.muscles) database.pastExercises
+      nextExerciseAfterThisContainingThisMuscle = nextExerciseAfterThisContainingMuscle database exercise muscle'
       partOfCurrentWorkout :: Bool
       partOfCurrentWorkout = isJust (find (\e -> e.exercise.name == exercise.name) database.currentTraining)
       pastTimeReadable = case lastExecutionOfThisExercise of
         Nothing -> L.p_ "Never executed!"
         Just lastExecutionInstance ->
-          let firstSorenessBetweenExecutions :: Maybe Soreness
-              firstSorenessBetweenExecutions =
-                find
-                  ( \soreness' ->
-                      soreness'.time
-                        > lastExecutionInstance.time
-                        && soreness'.muscle
-                          == muscle'
-                        && case nextExerciseAfterThisContainingThisMuscle of
-                          Nothing -> True
-                          Just nextExercise ->
-                            soreness'.time < nextExercise.time
-                  )
-                  database.sorenessHistory
-           in do
-                L.span_ $ L.toHtml $ "Last: " <> dayDiffText currentTime lastExecutionInstance.time
-                L.br_ []
-                case firstSorenessBetweenExecutions of
-                  Nothing -> L.span_ "No soreness."
-                  Just lastSoreness -> L.span_ $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji lastSoreness.soreness
-                L.br_ []
-                L.table_ [L.class_ "table table-sm"] do
-                  L.thead_ do
-                    L.tr_ do
-                      L.th_ "When"
-                      L.th_ "Comment"
-                  L.tbody_ do
-                    forM_ allExecutionsOfThisExercise \execution ->
-                      L.tr_ do
-                        L.td_ [L.class_ "text-nowrap"] $ L.toHtml $ pack $ formatTime defaultTimeLocale "%F" execution.time
-                        L.td_ (L.toHtml (intensityToText execution.intensity))
+          do
+            L.span_ $ L.toHtml $ "Last: " <> dayDiffText currentTime lastExecutionInstance.time
+            L.br_ []
+            case firstSorenessBetweenExecutions database muscle' exercise.name of
+              Nothing -> L.span_ "No soreness."
+              Just lastSoreness -> L.span_ $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji lastSoreness.soreness
+            L.br_ []
+            L.table_ [L.class_ "table table-sm"] do
+              L.thead_ do
+                L.tr_ do
+                  L.th_ "When"
+                  L.th_ "Comment"
+              L.tbody_ do
+                forM_ allExecutionsOfThisExercise \execution ->
+                  L.tr_ do
+                    L.td_ [L.class_ "text-nowrap"] $ L.toHtml $ pack $ formatTime defaultTimeLocale "%F" execution.time
+                    L.td_ (L.toHtml (intensityToText execution.intensity))
    in L.form_ [L.method_ "post", L.action_ "/toggle-exercise-in-workout"] do
         L.input_
           [ L.type_ "hidden",
