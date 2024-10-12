@@ -16,21 +16,24 @@
         let
           pkgs = import nixpkgs {
             inherit system;
-            overlays = [ ];
-          };
-
-          haskellPackages = pkgs.haskellPackages.override {
-            overrides = self: super: { };
           };
 
           packageName = "myocardio";
+
+          haskellPackages = pkgs.haskellPackages.override
+            {
+              overrides = self: super: {
+                myocardio = self.callCabal2nix packageName ./.
+                  {
+                    scotty = haskellPackages.scotty_0_22;
+                  };
+              };
+            };
+
         in
         {
           packages.${packageName} =
-            (haskellPackages.callCabal2nix packageName self
-              {
-                scotty = haskellPackages.scotty_0_22;
-              }).overrideAttrs (final: prev: {
+            haskellPackages.myocardio.overrideAttrs (final: prev: {
               postPatch = ''
                 sed -i -e 's#staticBasePath = .*#staticBasePath = "${placeholder "out"}/static"#' app/Main.hs
                 sed -i -e 's#svgBasePath = .*#svgBasePath = "${placeholder "out"}/svgs"#' app/Main.hs
@@ -48,16 +51,17 @@
           defaultPackage = self.packages.${system}.default;
 
           devShells.default =
-            pkgs.mkShell {
-              buildInputs = with pkgs; [
+            haskellPackages.shellFor {
+              withHoogle = true;
+
+              nativeBuildInputs = with pkgs; [
                 haskellPackages.haskell-language-server # you must build it with your ghc to work
                 cabal-install
                 ghcid
                 haskellPackages.hlint
                 haskellPackages.apply-refact
-
               ];
-              inputsFrom = [ self.packages.${system}.myocardio.env ];
+              packages = hpkgs: [ hpkgs.myocardio ];
             };
           devShell = self.devShells.${system}.default;
         }) // {
