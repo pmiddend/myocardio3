@@ -51,12 +51,12 @@ createDatabaseV1 connection =
     mapM_
       (execute_ connection)
       [ "CREATE TABLE IF NOT EXISTS Version ( version INTEGER NOT NULL )",
-        "CREATE TABLE IF NOT EXISTS Exercise ( id INT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL )",
-        "CREATE TABLE IF NOT EXISTS Muscle ( id INT PRIMARY KEY, name TEXT NOT NULL )",
-        "CREATE TABLE IF NOT EXISTS ExerciseHasMuscle ( exercise_id INT NOT NULL, muscle_id INT NOT NULL )",
-        "CREATE TABLE IF NOT EXISTS ExerciseHasFile ( exercise_id INT NOT NULL, file_content BLOB NOT NULL )",
-        "CREATE TABLE IF NOT EXISTS ExerciseWithIntensity ( exercise_id INT NOT NULL, intensity TEXT NOT NULL, time INT NOT NULL, committed INT NOT NULL )",
-        "CREATE TABLE IF NOT EXISTS Soreness ( muscle_id INT NOT NULL, soreness INT NOT NULL, time INT NOT NULL )"
+        "CREATE TABLE IF NOT EXISTS Exercise ( id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL )",
+        "CREATE TABLE IF NOT EXISTS Muscle ( id INTEGER PRIMARY KEY, name TEXT NOT NULL )",
+        "CREATE TABLE IF NOT EXISTS ExerciseHasMuscle ( exercise_id INTEGER NOT NULL, muscle_id INTEGER NOT NULL )",
+        "CREATE TABLE IF NOT EXISTS ExerciseHasFile ( exercise_id INTEGER NOT NULL, file_content BLOB NOT NULL )",
+        "CREATE TABLE IF NOT EXISTS ExerciseWithIntensity ( exercise_id INTEGER NOT NULL, intensity TEXT NOT NULL, time INTEGER NOT NULL, committed INTEGER NOT NULL )",
+        "CREATE TABLE IF NOT EXISTS Soreness ( muscle_id INTEGER NOT NULL, soreness INTEGER NOT NULL, time INTEGER NOT NULL )"
       ]
       
 getUploadedFileDir :: (MonadIO m) => m FilePath
