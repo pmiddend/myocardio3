@@ -29,7 +29,7 @@ common shared-properties
   
 library
   import: shared-properties, warnings
-  exposed-modules: Myocardio.Database
+  exposed-modules: Myocardio.Database, Myocardio.DatabaseNew
   build-depends:    base ^>=4.18.2.1
     , aeson
     , text
@@ -38,7 +38,8 @@ library
     , directory
     , safe
     , containers
-    , directory
+                  , directory
+                  , sqlite-simple
   hs-source-dirs:   lib
   default-language: GHC2021
 
