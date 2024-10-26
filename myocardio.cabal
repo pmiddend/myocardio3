@@ -31,18 +31,29 @@ library
   import: shared-properties, warnings
   exposed-modules: Myocardio.Database, Myocardio.DatabaseNew
   build-depends:    base ^>=4.18.2.1
-    , aeson
-    , text
-    , time
-    , xdg-basedir
-    , directory
-    , safe
-    , containers
+                  , aeson
+                  , text
+                  , time
+                  , xdg-basedir
+                  , directory
+                  , safe
+                  , containers
                   , directory
                   , sqlite-simple
+                  , bytestring
   hs-source-dirs:   lib
   default-language: GHC2021
 
+executable db-test
+  import: shared-properties, warnings
+  main-is: DbTest.hs
+  hs-source-dirs: app
+  default-language: GHC2021
+  build-depends:
+      base >=4.7 && <5
+    , myocardio
+    , sqlite-simple
+    
 executable myocardio-exe
   import: shared-properties, warnings
   main-is: Main.hs
