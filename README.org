@@ -3,4 +3,12 @@
 [[https://github.com/pmiddend/myocardio/actions/workflows/build-with-cabal.yaml][file:https://github.com/pmiddend/myocardio3/actions/workflows/build-with-cabal.yaml/badge.svg]]
 [[https://github.com/pmiddend/myocardio/actions/workflows/build-with-nix.yaml][file:https://github.com/pmiddend/myocardio3/actions/workflows/build-with-nix.yaml/badge.svg]]
 
-This README is in progress, please be patient with me.
+** How to use
+
+TODO
+** Programming Principles
+
+*No Javascript*: We provide a web server that speaks HTML/CSS, but there will be no Javascript involved.
+
+*Text browser compatible*: We'll regularly try out the output with a text browser such as emacs' eww or links.
+
