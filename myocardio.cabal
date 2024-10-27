@@ -37,6 +37,8 @@ library
                   , xdg-basedir
                   , directory
                   , safe
+                  , unliftio
+                  , unliftio-core
                   , containers
                   , directory
                   , sqlite-simple
@@ -71,10 +73,6 @@ executable myocardio-exe
     , split
     , base16-bytestring
     , xdg-basedir
-    , xml-conduit
-    , xml-lens
-    , data-default
-    , lens
     , directory
     , bytestring
     , containers

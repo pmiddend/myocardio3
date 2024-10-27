@@ -2,10 +2,20 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Myocardio.DatabaseNew
   ( withDatabase,
-    retrieveExercises,
+    retrieveExercisesWithCurrentIntensity,
+    retrieveExercisesDescriptions,
+    ExerciseWithIntensity (..),
+    retrieveFile,
+    ExerciseDescription (..),
+    retrieveAllMuscles,
+    Muscle (..),
+    Soreness (..),
+    ExerciseCommitted (..),
+    retrieveSoreness,
   )
 where
 
@@ -13,13 +23,16 @@ import Control.Applicative (pure)
 import Control.Exception (catch)
 import Control.Monad (mapM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Data.Bool (Bool (True))
 import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as BSL
 import Data.Foldable (forM_, for_)
-import Data.Function (($))
+import Data.Function (($), (.))
 import Data.Functor ((<$>))
 import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
 import Data.Int (Int)
+import Data.List (head)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, listToMaybe)
 import Data.Monoid (mempty)
@@ -27,14 +40,17 @@ import Data.Ord (Ord)
 import Data.Semigroup ((<>))
 import Data.Set (Set)
 import Data.Set qualified as Set
+import Data.String (String)
 import Data.Text (Text, pack, unpack)
-import Database.SQLite.Simple (Connection, Only (Only, fromOnly), Query, SQLError, ToRow, execute, execute_, lastInsertRowId, query, query_, withConnection, withTransaction)
+import Data.Tuple (uncurry)
+import Database.SQLite.Simple (Connection, Only (Only, fromOnly), Query, SQLError, ToRow, close, execute, execute_, lastInsertRowId, open, query, query_, withTransaction)
 import Myocardio.Database qualified as DatabaseJson
 import Myocardio.Database qualified as OldDb
 import System.Directory (createDirectoryIfMissing)
 import System.Environment.XDG.BaseDir (getUserConfigDir, getUserDataDir)
 import System.IO (FilePath, IO)
 import Text.Show (Show, show)
+import UnliftIO.Exception (bracket)
 import Prelude (error)
 
 checkVersionNumber :: (MonadIO m) => Connection -> m (Maybe Int)
@@ -140,21 +156,27 @@ migrateDatabase connection = do
     Just 1 -> pure ()
     Just v -> error $ "invalid version stored in DB: expected 1, got " <> show v
 
-withDatabase :: (Connection -> IO b) -> IO b
+-- | sqlite-simple does provide withConnection, but it's only in IO, and because of scotty, we need it in a more arbitrary monad
+withConnection :: (MonadUnliftIO m) => String -> (Connection -> m a) -> m a
+withConnection url = bracket (liftIO (open url)) (liftIO . close)
+
+-- | Open a connect, migrate the DB if needed, and give the connection to the user
+withDatabase :: (MonadUnliftIO m) => (Connection -> m b) -> m b
 withDatabase f = do
-  configBaseDir <- getUserConfigDir "myocardio3"
-  createDirectoryIfMissing True configBaseDir
+  configBaseDir <- liftIO $ getUserConfigDir "myocardio3"
+  liftIO $ createDirectoryIfMissing True configBaseDir
   withConnection (configBaseDir <> "/" <> "db.sqlite") \connection -> do
-    execute_ connection "PRAGMA foreign_keys = ON;"
+    liftIO (execute_ connection "PRAGMA foreign_keys = ON;")
     migrateDatabase connection
     f connection
 
-data Exercise = Exercise
+data ExerciseWithIntensity = ExerciseWithIntensity
   { id :: Int,
     muscles :: !(Set.Set Text),
     description :: !Text,
     name :: !Text,
-    fileIds :: !(Set Int)
+    fileIds :: !(Set Int),
+    intensity :: Text
   }
   deriving (Show)
 
@@ -167,19 +189,105 @@ multiInsert key newValue = Map.alter alterer key
 multiInsertMMap :: (Ord k, Ord p) => IORef (Map.Map k (Set.Set p)) -> k -> p -> IO ()
 multiInsertMMap ref key newValue = modifyIORef ref (multiInsert key newValue)
 
-retrieveExercises :: Connection -> Bool -> IO [Exercise]
-retrieveExercises conn committed = do
+data Soreness = Soreness
+  { muscle :: !Text,
+    soreness :: !Int
+  }
+  deriving (Show)
+
+-- For every muscle, calculate the latest soreness value
+retrieveSoreness :: Connection -> IO [Soreness]
+retrieveSoreness connection = do
+  -- Courtesy of
+  -- https://stackoverflow.com/questions/17327043/how-can-i-select-rows-with-most-recent-timestamp-for-each-key-value
+  results <-
+    query_
+      connection
+      "SELECT \
+      \ M.name, L.muscle_id, L.soreness \
+      \ FROM Soreness L \
+      \ LEFT JOIN Soreness R ON L.muscle_id = R.muscle_id AND L.time < R.time \
+      \ INNER JOIN Muscle M ON M.id == L.muscle_id \
+      \ WHERE R.muscle_id IS NULL AND L.soreness > 0" ::
+      IO [(Text, Int, Int)]
+
+  pure ((\(muscleName, _muscleId, soreness) -> Soreness muscleName soreness) <$> results)
+
+data ExerciseCommitted = Committed | NotCommitted
+
+retrieveExercisesWithCurrentIntensity :: Connection -> ExerciseCommitted -> IO [ExerciseWithIntensity]
+retrieveExercisesWithCurrentIntensity conn committed = do
   results <-
     query
       conn
-      "SELECT E.id, E.description, E.name, M.name muscle_name, F.id file_id \
+      "SELECT E.id, E.description, E.name, M.name muscle_name, F.id file_id, WI.intensity \
       \  FROM Exercise as E \
       \  LEFT JOIN ExerciseHasMuscle ON E.id = ExerciseHasMuscle.exercise_id \
       \  LEFT JOIN Muscle M ON M.id = ExerciseHasMuscle.muscle_id \
       \  LEFT JOIN ExerciseHasFile F ON E.id = F.exercise_id \
       \  LEFT JOIN ExerciseWithIntensity WI ON E.id = WI.exercise_id \
       \  WHERE WI.committed = ?"
-      (Only (if committed then 1 else 0 :: Int)) ::
+      (Only @Int (case committed of Committed -> 1; NotCommitted -> 0)) ::
+      IO [(Int, Text, Text, Maybe Text, Maybe Int, Maybe Text)]
+
+  exerciseDataRef <- newIORef mempty
+  exerciseMusclesByIdRef <- newIORef mempty
+  exerciseFilesByIdRef <- newIORef mempty
+  exerciseToIntensityRef <- newIORef mempty
+  forM_ results \(exId, exDescription, exName, muName, fileId, intensity) -> do
+    insertMSet exerciseDataRef (exId, exDescription, exName)
+
+    for_ muName (multiInsertMMap exerciseMusclesByIdRef exId)
+    for_ fileId (multiInsertMMap exerciseFilesByIdRef exId)
+
+    for_ intensity (insertMMap exerciseToIntensityRef exId)
+
+  exerciseData <- readIORef exerciseDataRef
+  exerciseMusclesById <- readIORef exerciseMusclesByIdRef
+  exerciseFilesById <- readIORef exerciseFilesByIdRef
+  exerciseToIntensity <- readIORef exerciseToIntensityRef
+
+  pure
+    ( ( \(exId, exDescription, exName) ->
+          ExerciseWithIntensity
+            { id = exId,
+              description = exDescription,
+              name = exName,
+              muscles = fromMaybe mempty (Map.lookup exId exerciseMusclesById),
+              fileIds = fromMaybe mempty (Map.lookup exId exerciseFilesById),
+              intensity = fromMaybe "N/A" (Map.lookup exId exerciseToIntensity)
+            }
+      )
+        <$> Set.toList exerciseData
+    )
+
+data Muscle = Muscle {id :: Int, name :: Text} deriving (Show)
+
+retrieveAllMuscles :: Connection -> IO [Muscle]
+retrieveAllMuscles connection = do
+  results <- query_ connection "SELECT id, name FROM Muscle ORDER BY name ASC" :: IO [(Int, Text)]
+  pure (uncurry Muscle <$> results)
+
+data ExerciseDescription = ExerciseDescription
+  { id :: Int,
+    muscles :: !(Set.Set Text),
+    description :: !Text,
+    name :: !Text,
+    fileIds :: !(Set Int)
+  }
+  deriving (Show)
+
+retrieveExercisesDescriptions :: Connection -> IO [ExerciseDescription]
+retrieveExercisesDescriptions conn = do
+  results <-
+    query_
+      conn
+      "SELECT E.id, E.description, E.name, M.name muscle_name, F.id file_id \
+      \  FROM Exercise as E \
+      \  LEFT JOIN ExerciseHasMuscle ON E.id = ExerciseHasMuscle.exercise_id \
+      \  LEFT JOIN Muscle M ON M.id = ExerciseHasMuscle.muscle_id \
+      \  LEFT JOIN ExerciseHasFile F ON E.id = F.exercise_id \
+      \  ORDER BY E.name ASC" ::
       IO [(Int, Text, Text, Maybe Text, Maybe Int)]
 
   exerciseDataRef <- newIORef mempty
@@ -197,7 +305,7 @@ retrieveExercises conn committed = do
 
   pure
     ( ( \(exId, exDescription, exName) ->
-          Exercise
+          ExerciseDescription
             { id = exId,
               description = exDescription,
               name = exName,
@@ -207,3 +315,6 @@ retrieveExercises conn committed = do
       )
         <$> Set.toList exerciseData
     )
+
+retrieveFile :: Connection -> Int -> IO BSL.ByteString
+retrieveFile conn fileId = (fromOnly . head) <$> (query conn "SELECT file_content FROM ExerciseHasFile WHERE id = ?" (Only fileId))

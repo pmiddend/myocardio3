@@ -3,62 +3,50 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Main (main) where
 
 import Control.Applicative (Applicative (pure))
-import Control.Lens (Traversal', over, (...))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Crypto.Hash.SHA256 (hashlazy)
-import Data.Bifunctor (Bifunctor (second))
 import Data.Bool (Bool (True))
 import Data.ByteString.Base16 qualified as Base16
 import Data.ByteString.Lazy qualified as BSL
-import Data.Default (def)
-import Data.Either (partitionEithers)
 import Data.Eq (Eq ((/=)), (==))
-import Data.Foldable (Foldable (foldr, null), find, forM_, minimumBy, notElem)
+import Data.Foldable (find, forM_, notElem)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
-import Data.Int (Int)
 import Data.List (filter, lookup)
 import Data.List.NonEmpty qualified as NE
-import Data.Map qualified as Map
 import Data.Maybe (Maybe (Just, Nothing), mapMaybe, maybe)
-import Data.Ord (comparing)
+import Data.Monoid (mempty)
 import Data.Semigroup (Semigroup ((<>)))
-import Data.String (String)
-import Data.Text (Text, isPrefixOf, pack, unpack)
+import Data.Text (Text, pack, unpack)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TE
 import Data.Text.Lazy qualified as TL
-import Data.Time (NominalDiffTime)
-import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime)
-import Data.Tuple (snd)
+import Data.Time.Clock (getCurrentTime)
 import Lucid (renderText)
 import Myocardio.Database
-  ( Category (Strength),
-    DatabaseF (pastExercises),
+  ( Category,
     Exercise (Exercise, category, description, fileReferences, muscles, name),
     ExerciseName (ExerciseName),
-    ExerciseWithIntensity (exercise),
     FileReference (FileReference),
     Intensity (Intensity),
-    Muscle (Pecs),
+    Muscle,
     SorenessValue (NotSore),
     addExercise,
     addSoreness,
     changeIntensity,
     commitWorkout,
-    exercises,
     getHomeDbFile,
     modifyExercise,
     readDatabase,
     removeExercise,
     toggleExercise,
   )
+import Myocardio.DatabaseNew qualified as DBN
 import Network.HTTP.Types.Status (status400)
 import Network.Wai.Middleware.Static (addBase, isNotAbsolute, noDots, staticPolicy)
 import Network.Wai.Parse (FileInfo (fileContent, fileName))
@@ -66,12 +54,10 @@ import System.Directory (createDirectoryIfMissing, removeFile)
 import System.Environment (getEnvironment)
 import System.Environment.XDG.BaseDir (getUserDataDir)
 import System.IO (FilePath, IO, putStrLn)
-import Text.XML (Document, Name, readFile, renderLBS)
-import Text.XML.Lens (attributeSatisfies, attrs, named, root)
-import Util (packShow, packShowLazy)
-import Views (exerciseFormCategoryParam, exerciseFormDescriptionParam, exerciseFormFilesToDeleteParam, exerciseFormMusclesParam, exerciseFormNameParam, musclesAndLastExerciseSorted, viewChooseOuter, viewConcreteMuscleGroupExercisesOuter, viewExerciseDeletion, viewExerciseListOuter, viewPageCurrentHtml, viewStats)
-import Web.Scotty (ActionM, File, Parsable (parseParam, parseParamList), capture, file, files, finish, formParam, formParamMaybe, formParams, get, html, middleware, pathParam, post, queryParamMaybe, raw, readEither, redirect, regex, scotty, setHeader, status, text)
-import Prelude (Double, Either (Left, Right), Fractional ((/)), Num ((*), (+), (-)), RealFrac (round), Show (show), Traversable (traverse), realToFrac)
+import Util (packShowLazy)
+import Views (exerciseFormCategoryParam, exerciseFormDescriptionParam, exerciseFormFilesToDeleteParam, exerciseFormMusclesParam, exerciseFormNameParam, viewChooseOuter, viewConcreteMuscleGroupExercisesOuter, viewExerciseDeletion, viewExerciseListOuter, viewPageCurrentHtml, viewStats)
+import Web.Scotty (ActionM, File, Parsable (parseParam, parseParamList), capture, file, files, finish, formParam, formParamMaybe, formParams, get, html, middleware, pathParam, post, queryParamMaybe, raw, readEither, redirect, scotty, status, text)
+import Prelude (Either (Left, Right), Traversable (traverse))
 
 instance (Parsable a) => Parsable (NE.NonEmpty a) where
   parseParam v =
@@ -121,38 +107,6 @@ paramValues desiredParamName =
 staticBasePath :: FilePath
 staticBasePath = "static/"
 
--- This path is changed by the Nix build to point to $out
-svgBasePath :: FilePath
-svgBasePath = "svgs/"
-
-data MuscleWithWeight = MuscleWithWeight
-  { muscle :: Muscle,
-    weight :: Double
-  }
-
-fromTuple :: (Muscle, Double) -> MuscleWithWeight
-fromTuple (m, w) = MuscleWithWeight {muscle = m, weight = w}
-
-muscleLens :: Muscle -> Traversal' Document (Map.Map Name Text)
-muscleLens muscle' = root . named "svg" ... named "path" . attributeSatisfies "id" (isPrefixOf (packShow muscle' <> "-")) . attrs
-
-hsvGreen :: Double
-hsvGreen = 120.0
-
-applyWeight :: MuscleWithWeight -> Document -> Document
-applyWeight (MuscleWithWeight muscle' weight') =
-  over
-    (muscleLens muscle')
-    (Map.insert "style" ("fill:hsl(" <> pack (show (round @Double @Int (weight' * hsvGreen)) <> ", 50%, 50%)")))
-
-generateWeightedSvg :: (MonadIO m) => [MuscleWithWeight] -> String -> m BSL.ByteString
-generateWeightedSvg muscleWeights frontOrBack = do
-  oldDocument <- liftIO $ readFile def (svgBasePath <> "/" <> frontOrBack <> ".svg")
-  pure
-    $ renderLBS
-      def
-    $ foldr applyWeight oldDocument muscleWeights
-
 getDbFile :: (MonadIO m) => m FilePath
 getDbFile = do
   env <- liftIO getEnvironment
@@ -164,81 +118,46 @@ main = do
   putStrLn $ "using DB file " <> homeDbFile'
   scotty 3000 do
     get "/" do
-      homeDbFile <- getDbFile
-      db <- readDatabase homeDbFile
-      currentTime <- liftIO getCurrentTime
-      html $ renderText $ viewPageCurrentHtml currentTime db
-
-    get (regex "/muscles/([^\\.]*).svg") do
-      homeDbFile <- getDbFile
-      db <- readDatabase homeDbFile
-      frontOrBack <- pathParam "1"
-      currentTime <- liftIO getCurrentTime
-      let lastExercises :: [(Muscle, Maybe UTCTime)]
-          lastExercises = musclesAndLastExerciseSorted (filter (\pe -> pe.exercise.category == Strength) db.pastExercises)
-          muscleToCategory :: (Muscle, Maybe UTCTime) -> Either Muscle (Muscle, UTCTime)
-          muscleToCategory (m, Nothing) = Left m
-          muscleToCategory (m, Just t) = Right (m, t)
-          (musclesWithoutTime', musclesWithTime') = partitionEithers (muscleToCategory <$> lastExercises)
-          musclesWithoutTimeZeroed = (`MuscleWithWeight` 0.0) <$> musclesWithoutTime'
-          weightedExercises :: [MuscleWithWeight]
-          weightedExercises =
-            musclesWithoutTimeZeroed <> case NE.nonEmpty musclesWithTime' of
-              Just musclesWithTimeNE ->
-                let minTime :: UTCTime
-                    minTime = snd $ minimumBy (comparing snd) musclesWithTimeNE
-                    -- maxTime :: UTCTime
-                    -- maxTime = snd $ maximumBy (comparing snd) musclesWithTimeNE
-                    minMaxSpan :: NominalDiffTime
-                    minMaxSpan = currentTime `diffUTCTime` minTime
-                    lerpMin :: Double
-                    lerpMin =
-                      if null musclesWithoutTime'
-                        then 0.0
-                        else 0.2
-                    lerpTime :: UTCTime -> Double
-                    lerpTime t =
-                      realToFrac ((t `diffUTCTime` minTime) / minMaxSpan) * (1 - lerpMin) + lerpMin
-                    lerped :: NE.NonEmpty MuscleWithWeight
-                    lerped = (fromTuple . second lerpTime <$> musclesWithTimeNE)
-                 in NE.toList lerped
-              _noMusclesWithTime -> []
-      setHeader "Content-Type" "image/svg+xml"
-      weightedSvg <- generateWeightedSvg weightedExercises frontOrBack
-      raw weightedSvg
+      DBN.withDatabase \connection -> do
+        allMuscles' <- liftIO $ DBN.retrieveAllMuscles connection
+        exercises <- liftIO $ DBN.retrieveExercisesWithCurrentIntensity connection DBN.NotCommitted
+        currentSoreness <- liftIO $ DBN.retrieveSoreness connection
+        html $ renderText $ viewPageCurrentHtml allMuscles' exercises currentSoreness
 
     get "/exercises" do
-      homeDbFile <- getDbFile
-      db <- readDatabase homeDbFile
-      withForm <- queryParamMaybe "with-form"
-      editExercise' <- queryParamMaybe "edit-exercise"
-      case editExercise' of
-        Nothing ->
-          html $
-            renderText $
-              viewExerciseListOuter
-                db
-                ( if withForm == Just True
-                    then
-                      Just
-                        Exercise
-                          { muscles = NE.singleton Pecs,
-                            category = Strength,
-                            description = "",
-                            name = ExerciseName "",
-                            fileReferences = []
-                          }
-                    else Nothing
-                )
-        Just editExercise'' ->
-          case find (\e -> e.name == editExercise'') db.exercises of
-            Nothing -> do
-              status status400
-              finish
-            Just exerciseFound ->
-              html $
-                renderText $
-                  viewExerciseListOuter db (Just exerciseFound)
+      DBN.withDatabase \connection -> do
+        exercises <- liftIO $ DBN.retrieveExercisesDescriptions connection
+        allMuscles' <- liftIO $ DBN.retrieveAllMuscles connection
+        withForm <- queryParamMaybe "with-form"
+        editExercise' <- queryParamMaybe "edit-exercise"
+        case editExercise' of
+          Nothing ->
+            html $
+              renderText $
+                viewExerciseListOuter
+                  allMuscles'
+                  exercises
+                  ( if withForm == Just True
+                      then
+                        Just
+                          DBN.ExerciseDescription
+                            { id = 0,
+                              muscles = mempty,
+                              description = "",
+                              name = "",
+                              fileIds = mempty
+                            }
+                      else Nothing
+                  )
+          Just editExercise'' ->
+            case find (\e -> e.name == editExercise'') exercises of
+              Nothing -> do
+                status status400
+                finish
+              Just exerciseFound ->
+                html $
+                  renderText $
+                    viewExerciseListOuter allMuscles' exercises (Just exerciseFound)
 
     get (capture "/training") do
       homeDbFile <- getDbFile
@@ -257,10 +176,11 @@ main = do
       muscle <- pathParam "muscle"
       html $ renderText $ viewConcreteMuscleGroupExercisesOuter db currentTime muscle
 
-    get "/uploaded-files/:fn" do
-      fileName <- pathParam "fn"
-      uploadedFileDir <- getUploadedFileDir
-      file (uploadedFileDir <> "/" <> fileName)
+    get "/uploaded-files/:fileid" do
+      DBN.withDatabase \connection -> do
+        fileId <- pathParam "fileid"
+        file <- liftIO $ DBN.retrieveFile connection fileId
+        raw file
 
     get "/remove-exercise/:exercise-name" do
       exerciseName <- pathParam "exercise-name"
