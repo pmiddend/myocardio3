@@ -25,7 +25,7 @@ import CMarkGFM (commonmarkToHtml)
 import Control.Monad (unless, when, (>>=))
 import Data.Bool (Bool (True), (&&))
 import Data.Eq (Eq, (==))
-import Data.Foldable (Foldable (elem, length), find, forM_, mapM_)
+import Data.Foldable (Foldable (elem, length), find, foldMap, foldr, forM_, mapM_)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
 import Data.Int (Int)
@@ -64,8 +64,10 @@ import Myocardio.Database
     intensityToText,
     nextExerciseAfterThisContainingMuscle,
   )
+import Myocardio.DatabaseNew qualified as DBN
 import Safe (lastMay, maximumByMay)
 import Text.Read (Read)
+import Text.Show (show)
 import Util (packShow)
 import Web.Scotty (Parsable (parseParam), readEither)
 import Prelude (Fractional ((/)), RealFrac (round), Show)
@@ -162,14 +164,14 @@ makeId (HtmlId i) = L.id_ i
 makeHref :: HtmlId -> L.Attributes
 makeHref (HtmlId i) = L.href_ ("#" <> i)
 
-sorenessValueToEmoji :: SorenessValue -> Text
-sorenessValueToEmoji VerySore = "😭"
-sorenessValueToEmoji LittleSore = "😕"
-sorenessValueToEmoji _otherSoreness = ""
+sorenessValueToEmoji :: Int -> Text
+sorenessValueToEmoji 0 = ""
+sorenessValueToEmoji 1 = "😕"
+sorenessValueToEmoji _ = "😭"
 
-sorenessOutput :: Database -> L.Html ()
-sorenessOutput database = do
-  let sorenessToHtml :: Soreness -> L.Html ()
+sorenessOutput :: [DBN.Soreness] -> L.Html ()
+sorenessOutput soreness = do
+  let sorenessToHtml :: DBN.Soreness -> L.Html ()
       sorenessToHtml soreness' = L.li_ $ L.form_ [L.action_ "/reset-soreness", L.method_ "post"] do
         L.input_ [L.type_ "hidden", L.name_ "muscle", L.value_ (packShow soreness'.muscle)]
         L.span_ [L.class_ "me-1"] (L.toHtml (sorenessValueToEmoji soreness'.soreness))
@@ -178,7 +180,7 @@ sorenessOutput database = do
           [L.type_ "submit", L.class_ "btn btn-link"]
           "Reset"
   L.div_ [L.id_ "soreness-output"] do
-    L.ul_ (mapM_ sorenessToHtml $ mapMaybe (currentMuscleSoreness database) allMuscles)
+    L.ul_ (mapM_ sorenessToHtml soreness)
 
 idCurrentWorkout :: HtmlId
 idCurrentWorkout = HtmlId "current-workout"
@@ -189,8 +191,8 @@ idSoreness = HtmlId "soreness"
 idExerciseHistory :: HtmlId
 idExerciseHistory = HtmlId "exercise-history"
 
-sorenessInputAndOutput :: Database -> L.Html ()
-sorenessInputAndOutput database = do
+sorenessInputAndOutput :: [DBN.Soreness] -> L.Html ()
+sorenessInputAndOutput soreness = do
   L.h1_ [makeId idSoreness] do
     iconHtml "graph-down-arrow"
     L.span_ "Soreness"
@@ -203,16 +205,16 @@ sorenessInputAndOutput database = do
         L.label_ [L.for_ "i-am-sore"] "I am sore here"
     L.div_ [L.class_ "d-flex justify-content-evenly align-items-center mb-2"] do
       L.input_ [L.class_ "btn-check", L.type_ "radio", L.name_ "how-sore", L.id_ "verysore", L.value_ (packShow VerySore), L.checked_]
-      L.label_ [L.class_ "btn", L.for_ "verysore"] (L.toHtml $ sorenessValueToEmoji VerySore <> " VERY")
+      L.label_ [L.class_ "btn", L.for_ "verysore"] (L.toHtml $ sorenessValueToEmoji 2 <> " VERY")
       L.input_ [L.class_ "btn-check", L.type_ "radio", L.name_ "how-sore", L.id_ "alittle", L.value_ (packShow LittleSore)]
-      L.label_ [L.class_ "btn", L.for_ "alittle"] (L.toHtml $ sorenessValueToEmoji LittleSore <> " A LITTLE")
+      L.label_ [L.class_ "btn", L.for_ "alittle"] (L.toHtml $ sorenessValueToEmoji 1 <> " A LITTLE")
     L.div_ [L.class_ "d-flex justify-content-center"] do
       L.button_
         [ L.class_ "btn btn-primary",
           L.type_ "submit"
         ]
         "Submit"
-  sorenessOutput database
+  sorenessOutput soreness
 
 dayDiffText :: UTCTime -> UTCTime -> Text
 dayDiffText currentTime before =
@@ -222,7 +224,7 @@ dayDiffText currentTime before =
         1 -> "yesterday"
         n -> packShow n <> " days ago"
 
-viewExerciseImageCarousel :: Exercise -> L.Html ()
+viewExerciseImageCarousel :: DBN.ExerciseWithIntensity -> L.Html ()
 viewExerciseImageCarousel exercise = do
   L.div_
     [ L.class_ "carousel slide",
@@ -232,13 +234,13 @@ viewExerciseImageCarousel exercise = do
     $ do
       L.div_
         [L.class_ "carousel-inner"]
-        ( forM_ (zip [0 ..] exercise.fileReferences) \(i, FileReference fileRef) ->
+        ( forM_ (zip [0 ..] (Set.toList exercise.fileIds)) \(i, fileId) ->
             L.div_
               [ L.class_ "carousel-item" <> if i == (0 :: Int) then L.class_ "active" else mempty
               ]
-              $ L.img_ [L.src_ ("/uploaded-files/" <> fileRef), L.class_ "d-block w-100"]
+              $ L.img_ [L.src_ ("/uploaded-files/" <> packShow fileId), L.class_ "d-block w-100"]
         )
-      unless (length exercise.fileReferences <= 1) do
+      unless (Set.size exercise.fileIds <= 1) do
         L.button_
           [ L.type_ "button",
             L.class_ "carousel-control-prev",
@@ -254,19 +256,19 @@ viewExerciseImageCarousel exercise = do
           ]
           (L.span_ [L.class_ "carousel-control-next-icon"] mempty)
 
-viewSingleExerciseInCurrentWorkout :: ExerciseWithIntensity Exercise -> L.Html ()
+viewSingleExerciseInCurrentWorkout :: DBN.ExerciseWithIntensity -> L.Html ()
 viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
-  viewExerciseImageCarousel exWithIn.exercise
+  viewExerciseImageCarousel exWithIn
   L.div_ [L.class_ "card-body"] do
     L.h5_ [L.class_ "card-title"] do
-      L.strong_ (L.toHtml (packShow exWithIn.exercise.name))
+      L.strong_ (L.toHtml (packShow exWithIn.name))
     L.h6_ [L.class_ "card-subtitle"] do
-      "Intensity: " <> L.strong_ (L.toHtml (intensityToText exWithIn.intensity))
+      "Intensity: " <> L.strong_ (L.toHtml exWithIn.intensity)
     L.p_ [L.class_ "card-text text-info"] do
-      L.toHtmlRaw $ commonmarkToHtml [] [] exWithIn.exercise.description
+      L.toHtmlRaw $ commonmarkToHtml [] [] exWithIn.description
       L.form_ [L.action_ "/toggle-exercise-in-workout", L.method_ "post"] do
         L.input_ [L.type_ "hidden", L.name_ "return-to-current", L.value_ (packShow True)]
-        L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.exercise.name)]
+        L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.name)]
         L.button_
           [ L.type_ "submit",
             L.class_ "btn btn-secondary btn-sm"
@@ -275,10 +277,10 @@ viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
             iconHtml "trash"
             L.span_ "Remove from workout"
       L.form_ [L.action_ "/change-intensity", L.method_ "post"] do
-        L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.exercise.name)]
+        L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.name)]
         L.input_
           [ L.class_ "form-control form-control-sm mb-1",
-            L.value_ (intensityToText exWithIn.intensity),
+            L.value_ exWithIn.intensity,
             L.name_ "intensity",
             L.type_ "text"
           ]
@@ -290,17 +292,19 @@ viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
             iconHtml "send"
             L.span_ "Change intensity"
 
-viewCurrentWorkout :: Database -> L.Html ()
-viewCurrentWorkout database =
+viewCurrentWorkout :: [DBN.Muscle] -> [DBN.ExerciseWithIntensity] -> L.Html ()
+viewCurrentWorkout allMuscles' exercises =
   L.div_ [makeId idCurrentWorkout] do
-    case database.currentTraining of
+    case exercises of
       [] -> mempty
       currentExercises -> do
         L.h1_ do
           iconHtml "joystick"
           L.span_ "Current"
-        let musclesInvolved = currentExercises >>= (NE.toList . (.muscles) . (.exercise))
-            musclesMissing = Set.toList $ Set.fromList allMuscles `Set.difference` Set.fromList musclesInvolved
+        let musclesInvolved :: Set.Set Text
+            musclesInvolved = foldMap (\e -> e.muscles) currentExercises
+            musclesMissing :: [Text]
+            musclesMissing = Set.toList $ foldr (\newMuscle -> Set.insert newMuscle.name) Set.empty allMuscles' `Set.difference` musclesInvolved
         L.div_ [L.class_ "gap-1 mb-3"] do
           L.span_ [L.class_ "text-muted me-1"] "Trained: "
           forM_ musclesInvolved \muscle' -> L.span_ [L.class_ "badge text-bg-success me-1"] (L.toHtml $ packShow muscle')
@@ -309,8 +313,7 @@ viewCurrentWorkout database =
           forM_ musclesMissing \muscle' -> L.span_ [L.class_ "badge text-bg-warning me-1"] (L.toHtml $ packShow muscle')
         forM_ (chunksOf 2 currentExercises) \exerciseRow -> do
           L.div_ [L.class_ "row"] do
-            forM_ exerciseRow \exerciseInRow ->
-              L.div_ [L.class_ "col-lg-6 col-12"] (viewSingleExerciseInCurrentWorkout exerciseInRow)
+            forM_ exerciseRow (L.div_ [L.class_ "col-lg-6 col-12"] . viewSingleExerciseInCurrentWorkout)
 
         L.form_ [L.action_ "/commit-workout", L.method_ "post"] do
           L.button_
@@ -336,6 +339,9 @@ viewSingleExerciseInChooser currentTime database muscle' exercise =
       nextExerciseAfterThisContainingThisMuscle = nextExerciseAfterThisContainingMuscle database exercise muscle'
       partOfCurrentWorkout :: Bool
       partOfCurrentWorkout = isJust (find (\e -> e.exercise.name == exercise.name) database.currentTraining)
+      oldSorenessToInt VerySore = 2
+      oldSorenessToInt LittleSore = 1
+      oldSorenessToInt _ = 0
       pastTimeReadable = case lastExecutionOfThisExercise of
         Nothing -> L.p_ "Never executed!"
         Just lastExecutionInstance ->
@@ -344,7 +350,7 @@ viewSingleExerciseInChooser currentTime database muscle' exercise =
             L.br_ []
             case firstSorenessBetweenExecutions database muscle' exercise.name of
               Nothing -> L.span_ "No soreness."
-              Just lastSoreness -> L.span_ $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji lastSoreness.soreness
+              Just lastSoreness -> L.span_ $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji (oldSorenessToInt lastSoreness.soreness)
             L.br_ []
             L.table_ [L.class_ "table table-sm"] do
               L.thead_ do
@@ -363,7 +369,8 @@ viewSingleExerciseInChooser currentTime database muscle' exercise =
             L.value_ (packShow exercise.name)
           ]
         L.div_ [L.class_ "mb-3 card"] do
-          viewExerciseImageCarousel exercise
+          -- FIXME
+          -- viewExerciseImageCarousel exercise
           L.div_ [L.class_ "card-body"] do
             L.h5_ [L.class_ "card-title"] do
               L.span_ $ L.toHtml $ packShow exercise.name
@@ -431,8 +438,7 @@ viewConcreteMuscleGroupExercises currentTime database muscle = do
         L.div_ do
           forM_ (chunksOf 2 exercisesForThisMuscle) \exerciseRow -> do
             L.div_ [L.class_ "row"] do
-              forM_ exerciseRow \exerciseInRow ->
-                L.div_ [L.class_ "col-lg-6 col-12"] (viewSingleExerciseInChooser currentTime database muscle exerciseInRow)
+              forM_ exerciseRow (L.div_ [L.class_ "col-lg-6 col-12"] . viewSingleExerciseInChooser currentTime database muscle)
 
 viewChoose :: Database -> L.Html ()
 viewChoose database = do
@@ -483,8 +489,8 @@ exerciseFormDescriptionParam = "description"
 idExerciseForm :: HtmlId
 idExerciseForm = HtmlId "new-exercise-form"
 
-exerciseFormHtml :: Exercise -> L.Html ()
-exerciseFormHtml (Exercise {name, category, muscles, fileReferences, description}) =
+viewExerciseFormHtml :: [DBN.Muscle] -> DBN.ExerciseDescription -> L.Html ()
+viewExerciseFormHtml allMuscles' (DBN.ExerciseDescription {name, muscles, fileIds, description}) =
   L.form_ [L.enctype_ "multipart/form-data", L.method_ "post", L.action_ "/edit-exercise"] do
     L.input_
       [ L.type_ "hidden",
@@ -501,23 +507,8 @@ exerciseFormHtml (Exercise {name, category, muscles, fileReferences, description
         ]
       L.label_ [L.for_ "exercise-name"] "Name"
 
-    L.h5_ "Category"
-    L.div_ [L.class_ "d-flex justify-content-evenly mb-3"] $ forM_ allCategories \category' -> do
-      L.input_
-        [ L.class_ "btn-check",
-          L.id_ ("category-" <> htmlIdFromText (packShow category')),
-          L.type_ "radio",
-          L.name_ exerciseFormCategoryParam,
-          if category' == category then L.checked_ else mempty,
-          L.value_ (packShow category')
-        ]
-      L.label_
-        [L.for_ ("category-" <> packShow category'), L.class_ "btn btn-outline-info"]
-        $ L.toHtml
-        $ packShow category'
-
     L.h5_ "Muscles involved"
-    L.div_ [L.class_ "mb-3"] $ forM_ allMuscles \muscle' -> do
+    L.div_ [L.class_ "mb-3"] $ forM_ ((\muscle -> muscle.name) <$> allMuscles') \muscle' -> do
       L.input_
         [ L.class_ "btn-check",
           L.id_ ("muscle-" <> htmlIdFromText (packShow muscle')),
@@ -539,7 +530,7 @@ exerciseFormHtml (Exercise {name, category, muscles, fileReferences, description
       (L.toHtml description)
 
     L.h5_ "Attached files"
-    forM_ fileReferences \(FileReference fileRef) -> do
+    forM_ fileIds \fileId -> do
       L.div_ [L.class_ "d-flex flex-row mb-3 align-items-center justify-content-evenly"] do
         L.div_ do
           L.div_ [L.class_ "form-check"] do
@@ -547,11 +538,11 @@ exerciseFormHtml (Exercise {name, category, muscles, fileReferences, description
               [ L.type_ "checkbox",
                 L.class_ "form-check-input",
                 L.name_ exerciseFormFilesToDeleteParam,
-                L.id_ ("delete-" <> fileRef),
-                L.value_ fileRef
+                L.id_ ("delete-" <> packShow fileId),
+                L.value_ (packShow fileId)
               ]
-            L.label_ [L.class_ "form-check-label", L.for_ ("delete-" <> fileRef)] "Delete this"
-        L.div_ (exerciseImageHtml (FileReference fileRef))
+            L.label_ [L.class_ "form-check-label", L.for_ ("delete-" <> packShow fileId)] "Delete this"
+        L.div_ (viewExerciseImageHtml fileId)
 
     L.div_ [L.class_ "mb-3"] do
       L.label_ [L.for_ "file-upload", L.class_ "form-label"] "Files to attach"
@@ -587,27 +578,29 @@ newExerciseButtonHtml =
         iconHtml "plus-lg"
         L.span_ "New exercise"
 
-exerciseImageHtml :: FileReference -> L.Html ()
-exerciseImageHtml (FileReference fileRef) = L.figure_ [L.class_ "figure"] $ L.img_ [L.src_ ("/" <> pack "uploaded-files" <> "/" <> fileRef), L.class_ "figure-img img-fluid rounded"]
+viewExerciseImageHtml :: Int -> L.Html ()
+viewExerciseImageHtml fileId =
+  L.figure_ [L.class_ "figure"] $
+    L.img_ [L.src_ ("/" <> pack "uploaded-files" <> "/" <> packShow fileId), L.class_ "figure-img img-fluid rounded"]
 
-exerciseDescriptionHtml :: Exercise -> L.Html ()
-exerciseDescriptionHtml e = do
+viewExerciseDescriptionHtml :: DBN.ExerciseDescription -> L.Html ()
+viewExerciseDescriptionHtml e = do
   L.toHtmlRaw $ commonmarkToHtml [] [] e.description
-  forM_ e.fileReferences exerciseImageHtml
+  forM_ e.fileIds viewExerciseImageHtml
 
-viewExerciseListOuter :: Database -> Maybe Exercise -> L.Html ()
-viewExerciseListOuter db editedExercise =
-  viewHtmlSkeleton PageExercises $ viewExerciseList db editedExercise
+viewExerciseListOuter :: [DBN.Muscle] -> [DBN.ExerciseDescription] -> Maybe DBN.ExerciseDescription -> L.Html ()
+viewExerciseListOuter allMuscles exercises editedExercise =
+  viewHtmlSkeleton PageExercises $ viewExerciseList allMuscles exercises editedExercise
 
-viewExerciseList :: Database -> Maybe Exercise -> L.Html ()
-viewExerciseList db existingExercise = do
+viewExerciseList :: [DBN.Muscle] -> [DBN.ExerciseDescription] -> Maybe DBN.ExerciseDescription -> L.Html ()
+viewExerciseList allMuscles' exercises existingExercise = do
   L.div_ [makeId idExerciseForm, L.class_ "mb-3"] do
-    maybe newExerciseButtonHtml exerciseFormHtml existingExercise
+    maybe newExerciseButtonHtml (viewExerciseFormHtml allMuscles') existingExercise
   L.hr_ []
   L.h2_ do
     iconHtml "box2-heart"
     L.span_ "Exercise Descriptions"
-  forM_ db.exercises \exercise' -> do
+  forM_ exercises \exercise' -> do
     L.h3_ [L.id_ ("description-" <> htmlIdFromText (packShow exercise'.name)), L.class_ "d-flex"] do
       L.form_ [L.action_ "/exercises"] do
         L.input_ [L.type_ "hidden", L.name_ "edit-exercise", L.value_ (packShow exercise'.name)]
@@ -624,9 +617,8 @@ viewExerciseList db existingExercise = do
           (iconHtml' "trash-fill")
       L.toHtml (packShow exercise'.name)
     L.div_ [L.class_ "gap-1 mb-3"] do
-      L.span_ [L.class_ "badge text-bg-dark me-1"] (L.toHtml $ packShow exercise'.category)
       forM_ exercise'.muscles \muscle' -> L.span_ [L.class_ "badge text-bg-info me-1"] (L.toHtml $ packShow muscle')
-    L.div_ [L.class_ "alert alert-light"] (exerciseDescriptionHtml exercise')
+    L.div_ [L.class_ "alert alert-light"] (viewExerciseDescriptionHtml exercise')
 
 musclesAndLastExerciseSorted :: [ExerciseWithIntensity Exercise] -> [(Muscle, Maybe UTCTime)]
 musclesAndLastExerciseSorted pastExercises =
@@ -665,8 +657,8 @@ exerciseHistoryHtml currentTime db = do
       L.img_ [L.src_ "/muscles/back.svg", L.class_ "img-fluid"]
   exerciseHistoryForCategoryHtml currentTime db Strength
 
-viewPageCurrentHtml :: UTCTime -> Database -> L.Html ()
-viewPageCurrentHtml currentTime db = viewHtmlSkeleton PageCurrent $ do
+viewPageCurrentHtml :: [DBN.Muscle] -> [DBN.ExerciseWithIntensity] -> [DBN.Soreness] -> L.Html ()
+viewPageCurrentHtml allMuscles' exercises soreness = viewHtmlSkeleton PageCurrent $ do
   L.div_ [L.class_ "text-bg-light p-2"] do
     L.ul_ $ do
       L.li_ $ L.a_ [makeHref idCurrentWorkout] do
@@ -678,11 +670,9 @@ viewPageCurrentHtml currentTime db = viewHtmlSkeleton PageCurrent $ do
       L.li_ $ L.a_ [makeHref idExerciseHistory] do
         iconHtml "clipboard-data-fill"
         L.span_ "Exercise History"
-  viewCurrentWorkout db
+  viewCurrentWorkout allMuscles' exercises
   L.hr_ [L.class_ "mb-3"]
-  sorenessInputAndOutput db
-  L.hr_ [L.class_ "mb-3"]
-  exerciseHistoryHtml currentTime db
+  sorenessInputAndOutput soreness
 
 viewChooseOuter :: Database -> L.Html ()
 viewChooseOuter db = viewHtmlSkeleton PageChooseExercise (viewChoose db)
