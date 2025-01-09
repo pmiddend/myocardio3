@@ -38,6 +38,7 @@ import Data.String (IsString)
 import Data.Text (Text, pack, replace)
 import Data.Time.Clock (UTCTime (utctDay, utctDayTime), diffUTCTime, nominalDay)
 import Data.Time.Format (defaultTimeLocale, formatTime)
+import Data.Traversable (forM)
 import Data.Tuple (fst)
 import Lucid qualified as L
 import Lucid.Base (makeAttributes)
@@ -589,11 +590,15 @@ viewExerciseList allMuscles' exercises existingExercise = do
   L.div_ [makeId idExerciseForm, L.class_ "mb-3"] do
     maybe newExerciseButtonHtml (viewExerciseFormHtml allMuscles') existingExercise
   L.hr_ []
-  L.h2_ do
-    iconHtml "box2-heart"
-    L.span_ "Exercise Descriptions"
+  L.div_ [L.class_ "card text-bg-primary mb-3"] do
+    L.div_ [L.class_ "card-header"] "TOC"
+    L.div_ [L.class_ "card-body"] do
+      L.ul_ $
+        forM exercises \exercise -> L.li_ do
+          L.a_ [L.class_ "text-bg-primary", L.href_ ("#ex" <> packShow (exercise.id))] (L.toHtml exercise.name)
   forM_ exercises \exercise' -> do
     L.h3_ [L.id_ ("description-" <> htmlIdFromText exercise'.name), L.class_ "d-flex"] do
+      L.a_ [L.name_ ("ex" <> packShow exercise'.id)] mempty
       L.form_ [L.action_ "/exercises"] do
         L.input_ [L.type_ "hidden", L.name_ "edit-exercise", L.value_ (packShow exercise'.id)]
         L.button_
@@ -609,7 +614,7 @@ viewExerciseList allMuscles' exercises existingExercise = do
           (iconHtml' "trash-fill")
       L.toHtml exercise'.name
     L.div_ [L.class_ "gap-1 mb-3"] do
-      forM_ exercise'.muscles \muscle' -> L.span_ [L.class_ "badge text-bg-info me-1"] (L.toHtml muscle'.name)
+      forM_ exercise'.muscles \muscle' -> L.span_ [L.class_ "badge text-bg-primary me-1"] (L.toHtml muscle'.name)
     L.div_ [L.class_ "alert alert-light"] (viewExerciseDescriptionHtml exercise')
 
 viewExerciseHistory :: UTCTime -> [MuscleWithWorkout] -> L.Html ()
