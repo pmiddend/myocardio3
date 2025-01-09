@@ -295,10 +295,10 @@ viewCurrentWorkout allMuscles' exercises =
             musclesMissing = Set.fromList allMuscles' `Set.difference` musclesInvolved
         L.div_ [L.class_ "gap-1 mb-3"] do
           L.span_ [L.class_ "text-muted me-1"] "Trained: "
-          forM_ musclesInvolved \muscle' -> L.span_ [L.class_ "badge text-bg-success me-1"] (L.toHtml $ packShow muscle')
+          forM_ musclesInvolved \muscle' -> L.span_ [L.class_ "badge text-bg-success me-1"] (L.toHtml muscle'.name)
         L.div_ [L.class_ "gap-1 mb-3"] do
           L.span_ [L.class_ "text-muted me-1"] "Missing: "
-          forM_ musclesMissing \muscle' -> L.span_ [L.class_ "badge text-bg-warning me-1"] (L.toHtml $ packShow muscle')
+          forM_ musclesMissing \muscle' -> L.span_ [L.class_ "badge text-bg-warning me-1"] (L.toHtml muscle'.name)
         forM_ (chunksOf 2 currentExercises) \exerciseRow -> do
           L.div_ [L.class_ "row"] do
             forM_ exerciseRow (L.div_ [L.class_ "col-lg-6 col-12"] . viewSingleExerciseInCurrentWorkout)
