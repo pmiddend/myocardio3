@@ -458,7 +458,7 @@ updateExercise conn exerciseId muscles name description newFiles deleteOldFiles 
   forM_ muscles \muscle ->
     execute conn "INSERT INTO ExerciseHasMuscle (exercise_id, muscle_id) VALUES (?, ?)" (exerciseId, muscle.id)
   forM_ deleteOldFiles \oldFileId ->
-    execute conn "DELETE FROM ExerciseHasFile WHERE exercise_id = ? AND file_id = ?" (exerciseId, oldFileId)
+    execute conn "DELETE FROM ExerciseHasFile WHERE exercise_id = ? AND id = ?" (exerciseId, oldFileId)
   forM_ newFiles \file ->
     execute conn "INSERT INTO ExerciseHasFile (exercise_id, file_content) VALUES (?, ?)" (exerciseId, file)
 
