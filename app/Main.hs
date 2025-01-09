@@ -153,7 +153,7 @@ main = do
       withDatabase \connection -> do
         allMuscles' <- retrieveAllMuscles connection
         exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
-        currentSoreness <- retrieveSorenessHistory connection
+        currentSoreness <- retrieveCurrentSoreness connection
         html $ renderText $ viewChooseOuter allMuscles' currentSoreness exercises
 
     get (capture "/training/:muscleid") do
