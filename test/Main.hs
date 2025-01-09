@@ -5,7 +5,9 @@ module Main (main) where
 import Control.Applicative (pure)
 import Control.Exception (bracket)
 import Control.Monad ((>>=))
+import Data.Eq ((==))
 import Data.Fixed (Pico)
+import Data.Foldable (find)
 import Data.Function (const, ($))
 import Data.List (length)
 import Data.List.NonEmpty qualified as NE
@@ -13,7 +15,7 @@ import Data.Maybe (Maybe (Just, Nothing))
 import Data.Monoid (mempty)
 import Data.Set qualified as Set
 import Data.Time.Clock (NominalDiffTime, addUTCTime, getCurrentTime, secondsToNominalDiffTime)
-import Myocardio.DatabaseNew (Connection, MigrationFlags (NoJson), closeDatabase, insertExercise, insertMuscle, littleSore, migrateDatabase, muscleId, notSore, openDatabase, retrieveAllMuscles, retrieveCurrentSoreness, retrieveExercisesDescriptions, retrieveExercisesWithWorkouts, retrieveMusclesWithLastWorkoutTime, updateSoreness)
+import Myocardio.DatabaseNew (Connection, MigrationFlags (NoJson), closeDatabase, id, insertExercise, insertMuscle, littleSore, migrateDatabase, muscleId, notSore, openDatabase, retrieveAllMuscles, retrieveCurrentSoreness, retrieveExercisesDescriptions, retrieveExercisesWithWorkouts, retrieveMusclesWithLastWorkoutTime, retrieveSorenessHistory, toggleExercise, updateSoreness, workouts)
 import Safe (headMay)
 import System.Directory (removeFile)
 import System.FilePath (FilePath)
@@ -61,7 +63,11 @@ unitTests =
         step "Setting muscle to not sore anymore"
         updateSoreness conn pecs notSore now
         sorenessValues' <- retrieveCurrentSoreness conn
-        length sorenessValues' @?= 0,
+        length sorenessValues' @?= 0
+        step "Retrieve soreness history"
+        history <- retrieveSorenessHistory conn
+
+        length history @?= 2,
       testCaseSteps "add exercise, work them out" $ \step -> withTemporaryDb \conn -> do
         step "Creating muscles"
         pecs <- insertMuscle conn "Pecs"
@@ -84,128 +90,135 @@ unitTests =
         exercisesAndWorkouts <- retrieveExercisesWithWorkouts conn Nothing
         length exercisesAndWorkouts @?= 2
 
-        -- step "Adding to workout"
-        -- currentTime <- getCurrentTime
-        -- toggleExercise dbFile currentTime (ExerciseName "ex1") (Just (Intensity "intense!"))
+        step "Adding to workout"
+        currentTime <- getCurrentTime
 
-        -- contentsAfterToggle <- readDatabase dbFile
-        -- -- be sure our data is still there
-        -- length contentsAfterToggle.exercises @?= 2
-        -- length contentsAfterToggle.currentTraining @?= 1
-        -- length contentsAfterToggle.pastExercises @?= 0
+        toggleExercise conn ex1 currentTime "intense!"
+        exercisesAndWorkouts' <- retrieveExercisesWithWorkouts conn Nothing
 
-        -- case headMay contentsAfterToggle.currentTraining of
-        --   Just exWithIn -> do
-        --     exWithIn.exercise.name @?= ExerciseName "ex1"
-        --     exWithIn.intensity @?= Intensity "intense!"
-        --   Nothing -> assertFailure "didn't encounter just-added exercise in workout"
+        case find (\eaw -> eaw.id == ex1) exercisesAndWorkouts' of
+          Nothing -> assertFailure "couldn't find ex1 in exercise list"
+          Just ex1WithWorkouts ->
+            Set.size ex1WithWorkouts.workouts @?= 1
 
-        -- step "Committing workout"
-        -- commitWorkout dbFile
+            -- contentsAfterToggle <- readDatabase dbFile
+            -- -- be sure our data is still there
+            -- length contentsAfterToggle.exercises @?= 2
+            -- length contentsAfterToggle.currentTraining @?= 1
+            -- length contentsAfterToggle.pastExercises @?= 0
 
-        -- contentsAfterCommit <- readDatabase dbFile
-        -- -- be sure our data is still there
-        -- length contentsAfterCommit.exercises @?= 2
-        -- length contentsAfterCommit.currentTraining @?= 0
-        -- length contentsAfterCommit.pastExercises @?= 1,
-        -- testCaseSteps "add exercises, remove one of them" $ \step -> withTemporaryDb \dbFile -> do
-        --   step "Creating exercises"
-        --   addExercise dbFile $
-        --     Exercise
-        --       { muscles = NE.fromList [Pecs, Core],
-        --         category = Strength,
-        --         description = "some description",
-        --         fileReferences = [],
-        --         name = ExerciseName "ex1"
-        --       }
-        --   addExercise dbFile $
-        --     Exercise
-        --       { muscles = NE.fromList [Pecs, Core],
-        --         category = Strength,
-        --         description = "some description",
-        --         fileReferences = [],
-        --         name = ExerciseName "ex2"
-        --       }
-        --   step "Removing the first one"
-        --   removeExercise dbFile (ExerciseName "ex1")
-        --   contentsAfterRemoval <- readDatabase dbFile
+            -- case headMay contentsAfterToggle.currentTraining of
+            --   Just exWithIn -> do
+            --     exWithIn.exercise.name @?= ExerciseName "ex1"
+            --     exWithIn.intensity @?= Intensity "intense!"
+            --   Nothing -> assertFailure "didn't encounter just-added exercise in workout"
 
-        --   case contentsAfterRemoval.exercises of
-        --     [] -> assertFailure "no exercises left after removal"
-        --     [e] -> e.name @?= ExerciseName "ex2"
-        --     _ -> assertFailure "too many exercises left after removal",
-        -- testCaseSteps "add exercise, work them out, then have DOMS directly after" $
-        --   \step -> withTemporaryDb \dbFile -> do
-        --     step "Creating exercise"
+            -- step "Committing workout"
+            -- commitWorkout dbFile
 
-        --     let exName = ExerciseName "ex1"
+            -- contentsAfterCommit <- readDatabase dbFile
+            -- -- be sure our data is still there
+            -- length contentsAfterCommit.exercises @?= 2
+            -- length contentsAfterCommit.currentTraining @?= 0
+            -- length contentsAfterCommit.pastExercises @?= 1,
+            -- testCaseSteps "add exercises, remove one of them" $ \step -> withTemporaryDb \dbFile -> do
+            --   step "Creating exercises"
+            --   addExercise dbFile $
+            --     Exercise
+            --       { muscles = NE.fromList [Pecs, Core],
+            --         category = Strength,
+            --         description = "some description",
+            --         fileReferences = [],
+            --         name = ExerciseName "ex1"
+            --       }
+            --   addExercise dbFile $
+            --     Exercise
+            --       { muscles = NE.fromList [Pecs, Core],
+            --         category = Strength,
+            --         description = "some description",
+            --         fileReferences = [],
+            --         name = ExerciseName "ex2"
+            --       }
+            --   step "Removing the first one"
+            --   removeExercise dbFile (ExerciseName "ex1")
+            --   contentsAfterRemoval <- readDatabase dbFile
 
-        --     addExercise dbFile $
-        --       Exercise
-        --         { muscles = NE.fromList [Pecs, Core],
-        --           category = Strength,
-        --           description = "some description",
-        --           fileReferences = [],
-        --           name = exName
-        --         }
+            --   case contentsAfterRemoval.exercises of
+            --     [] -> assertFailure "no exercises left after removal"
+            --     [e] -> e.name @?= ExerciseName "ex2"
+            --     _ -> assertFailure "too many exercises left after removal",
+            -- testCaseSteps "add exercise, work them out, then have DOMS directly after" $
+            --   \step -> withTemporaryDb \dbFile -> do
+            --     step "Creating exercise"
 
-        --     step "Working out"
-        --     workoutDate <- getCurrentTime
-        --     toggleExercise dbFile workoutDate (ExerciseName "ex1") (Just (Intensity "intense!"))
-        --     commitWorkout dbFile
+            --     let exName = ExerciseName "ex1"
 
-        --     step "Adding DOMS a day later"
+            --     addExercise dbFile $
+            --       Exercise
+            --         { muscles = NE.fromList [Pecs, Core],
+            --           category = Strength,
+            --           description = "some description",
+            --           fileReferences = [],
+            --           name = exName
+            --         }
 
-        --     let aDayLater = addUTCTime (days 1) workoutDate
-        --         muchLater = addUTCTime (days 4) workoutDate
+            --     step "Working out"
+            --     workoutDate <- getCurrentTime
+            --     toggleExercise dbFile workoutDate (ExerciseName "ex1") (Just (Intensity "intense!"))
+            --     commitWorkout dbFile
 
-        --     -- Pecs are worked out as seen above
-        --     addSoreness dbFile aDayLater Pecs VerySore
+            --     step "Adding DOMS a day later"
 
-        --     -- Remove soreness later
-        --     addSoreness dbFile muchLater Pecs NotSore
+            --     let aDayLater = addUTCTime (days 1) workoutDate
+            --         muchLater = addUTCTime (days 4) workoutDate
 
-        --     -- Assert that we are shown "sore after workout" in the exercise view
-        --     readDatabase dbFile >>= \db ->
-        --       case firstSorenessBetweenExecutions db Pecs (ExerciseName "ex1") of
-        --         Nothing -> assertFailure "no soreness, but expected to be very sore"
-        --         Just sorenessWithMeta -> sorenessWithMeta.soreness @?= VerySore,
-        -- testCaseSteps "add exercise, work them out, then have DOMS a bit delayed" $
-        --   \step -> withTemporaryDb \dbFile -> do
-        --     step "Creating exercise"
+            --     -- Pecs are worked out as seen above
+            --     addSoreness dbFile aDayLater Pecs VerySore
 
-        --     let exName = ExerciseName "ex1"
+            --     -- Remove soreness later
+            --     addSoreness dbFile muchLater Pecs NotSore
 
-        --     addExercise dbFile $
-        --       Exercise
-        --         { muscles = NE.fromList [Pecs, Core],
-        --           category = Strength,
-        --           description = "some description",
-        --           fileReferences = [],
-        --           name = exName
-        --         }
+            --     -- Assert that we are shown "sore after workout" in the exercise view
+            --     readDatabase dbFile >>= \db ->
+            --       case firstSorenessBetweenExecutions db Pecs (ExerciseName "ex1") of
+            --         Nothing -> assertFailure "no soreness, but expected to be very sore"
+            --         Just sorenessWithMeta -> sorenessWithMeta.soreness @?= VerySore,
+            -- testCaseSteps "add exercise, work them out, then have DOMS a bit delayed" $
+            --   \step -> withTemporaryDb \dbFile -> do
+            --     step "Creating exercise"
 
-        --     step "Working out"
-        --     workoutDate <- getCurrentTime
-        --     toggleExercise dbFile workoutDate (ExerciseName "ex1") (Just (Intensity "intense!"))
-        --     commitWorkout dbFile
+            --     let exName = ExerciseName "ex1"
 
-        --     step "Adding DOMS two days later"
+            --     addExercise dbFile $
+            --       Exercise
+            --         { muscles = NE.fromList [Pecs, Core],
+            --           category = Strength,
+            --           description = "some description",
+            --           fileReferences = [],
+            --           name = exName
+            --         }
 
-        --     let twoDaysLater = addUTCTime (days 2) workoutDate
-        --         muchLater = addUTCTime (days 4) workoutDate
+            --     step "Working out"
+            --     workoutDate <- getCurrentTime
+            --     toggleExercise dbFile workoutDate (ExerciseName "ex1") (Just (Intensity "intense!"))
+            --     commitWorkout dbFile
 
-        --     -- Pecs are worked out as seen above
-        --     addSoreness dbFile twoDaysLater Pecs VerySore
+            --     step "Adding DOMS two days later"
 
-        --     -- Remove soreness later
-        --     addSoreness dbFile muchLater Pecs NotSore
+            --     let twoDaysLater = addUTCTime (days 2) workoutDate
+            --         muchLater = addUTCTime (days 4) workoutDate
 
-        --     -- Assert that we are shown "sore after workout" in the exercise view
-        --     readDatabase dbFile >>= \db ->
-        --       case firstSorenessBetweenExecutions db Pecs (ExerciseName "ex1") of
-        --         Nothing -> assertFailure "no soreness, but expected to be very sore"
-        --         Just sorenessWithMeta -> sorenessWithMeta.soreness @?= VerySore
+            --     -- Pecs are worked out as seen above
+            --     addSoreness dbFile twoDaysLater Pecs VerySore
+
+            --     -- Remove soreness later
+            --     addSoreness dbFile muchLater Pecs NotSore
+
+            --     -- Assert that we are shown "sore after workout" in the exercise view
+            --     readDatabase dbFile >>= \db ->
+            --       case firstSorenessBetweenExecutions db Pecs (ExerciseName "ex1") of
+            --         Nothing -> assertFailure "no soreness, but expected to be very sore"
+            --         Just sorenessWithMeta -> sorenessWithMeta.soreness @?= VerySore
     ]
 
 main :: IO ()

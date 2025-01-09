@@ -21,7 +21,7 @@ where
 
 import CMarkGFM (commonmarkToHtml)
 import Control.Monad (unless, (>>=))
-import Data.Bool (Bool (True), otherwise)
+import Data.Bool (Bool (True), not, otherwise)
 import Data.Eq (Eq, (==))
 import Data.Foldable (Foldable (elem), any, find, foldMap, forM_, for_, mapM_)
 import Data.Function (($), (.))
@@ -147,7 +147,7 @@ sorenessOutput soreness = do
       sorenessToHtml soreness' = L.li_ $ L.form_ [L.action_ "/reset-soreness", L.method_ "post"] do
         L.input_ [L.type_ "hidden", L.name_ "muscle", L.value_ (packShow soreness'.muscleId)]
         L.span_ [L.class_ "me-1"] (L.toHtml (sorenessValueToEmoji soreness'.soreness))
-        L.strong_ [L.class_ "me-1"] (L.toHtml (packShow soreness'.muscleName))
+        L.strong_ [L.class_ "me-1"] (L.toHtml soreness'.muscleName)
         L.button_
           [L.type_ "submit", L.class_ "btn btn-link"]
           "Reset"
@@ -246,7 +246,7 @@ viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
   viewExerciseImageCarousel exWithIn
   L.div_ [L.class_ "card-body"] do
     L.h5_ [L.class_ "card-title"] do
-      L.strong_ (L.toHtml (packShow exWithIn.name))
+      L.strong_ (L.toHtml exWithIn.name)
     L.h6_ [L.class_ "card-subtitle"] do
       for_ (Set.lookupMin exWithIn.workouts) \(ExerciseWorkout {intensity}) ->
         "Intensity: " <> L.strong_ (L.toHtml intensity)
@@ -254,7 +254,8 @@ viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
       L.toHtmlRaw $ commonmarkToHtml [] [] exWithIn.description
       L.form_ [L.action_ "/toggle-exercise-in-workout", L.method_ "post"] do
         L.input_ [L.type_ "hidden", L.name_ "return-to-current", L.value_ (packShow True)]
-        L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.name)]
+        L.input_ [L.value_ "", L.name_ "intensity", L.type_ "hidden"]
+        L.input_ [L.type_ "hidden", L.name_ "exercise-id", L.value_ (packShow exWithIn.id)]
         L.button_
           [ L.type_ "submit",
             L.class_ "btn btn-secondary btn-sm"
@@ -330,7 +331,7 @@ viewSingleExerciseInChooser currentTime muscle' sorenessHistory exerciseWithWork
       lastExecutionOfThisExercise =
         lastMay (Set.toList exerciseWithWorkouts.workouts)
       partOfCurrentWorkout :: Bool
-      partOfCurrentWorkout = any (\workout -> workout.committed) exerciseWithWorkouts.workouts
+      partOfCurrentWorkout = any (\workout -> not workout.committed) exerciseWithWorkouts.workouts
       viewLastExecution = case lastExecutionOfThisExercise of
         Nothing -> L.p_ "Never executed!"
         Just lastExecutionInstance ->
@@ -357,15 +358,15 @@ viewSingleExerciseInChooser currentTime muscle' sorenessHistory exerciseWithWork
   L.form_ [L.method_ "post", L.action_ "/toggle-exercise-in-workout"] do
     L.input_
       [ L.type_ "hidden",
-        L.name_ "exercise-name",
-        L.value_ (packShow exerciseWithWorkouts.name)
+        L.name_ "exercise-id",
+        L.value_ (packShow exerciseWithWorkouts.id)
       ]
     L.div_ [L.class_ "mb-3 card"] do
       -- FIXME
       -- viewExerciseImageCarousel exercise
       L.div_ [L.class_ "card-body"] do
         L.h5_ [L.class_ "card-title"] do
-          L.span_ $ L.toHtml $ packShow exerciseWithWorkouts.name
+          L.span_ $ L.toHtml exerciseWithWorkouts.name
         L.div_ [L.class_ "card-text"] do
           if partOfCurrentWorkout
             then do
