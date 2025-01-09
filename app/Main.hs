@@ -17,7 +17,7 @@ import Data.Eq (Eq ((/=)), (==))
 import Data.Foldable (find, foldMap)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
-import Data.List (filter)
+import Data.List (filter, sortOn)
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (Maybe (Just, Nothing), mapMaybe)
 import Data.Monoid (mempty)
@@ -116,11 +116,11 @@ main = do
 
     get "/exercises" do
       withDatabase \connection -> do
-        exercises <- retrieveExercisesDescriptions connection
+        exercises <- sortOn (.name) <$> retrieveExercisesDescriptions connection
         allMuscles' <- retrieveAllMuscles connection
         withForm <- queryParamMaybe "with-form"
-        editExercise' <- queryParamMaybe "edit-exercise"
-        case editExercise' of
+        editExerciseId <- queryParamMaybe "edit-exercise"
+        case editExerciseId of
           Nothing ->
             html $
               renderText $
@@ -139,8 +139,8 @@ main = do
                             }
                       else Nothing
                   )
-          Just editExercise'' ->
-            case find (\e -> e.name == editExercise'') exercises of
+          Just editExerciseId' ->
+            case find (\e -> e.id == editExerciseId') exercises of
               Nothing -> do
                 status status400
                 finish
