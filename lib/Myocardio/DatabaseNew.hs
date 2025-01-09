@@ -2,56 +2,143 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Myocardio.DatabaseNew
-  ( withDatabase,
-    retrieveExercisesWithCurrentIntensity,
-    retrieveExercisesDescriptions,
-    ExerciseWithIntensity (..),
-    retrieveFile,
+  ( ExerciseWithWorkouts (..),
     ExerciseDescription (..),
-    retrieveAllMuscles,
+    ExerciseWorkout (..),
     Muscle (..),
     Soreness (..),
     ExerciseCommitted (..),
-    retrieveSoreness,
+    MuscleWithWorkout (..),
+    MigrationFlags (..),
+    IdType,
+    withDatabase,
+    notSore,
+    littleSore,
+    verySore,
+    retrieveFile,
+    migrateDatabase,
+    openDatabase,
+    closeDatabase,
+    retrieveAllMuscles,
+    retrieveExercisesWithWorkouts,
+    retrieveExercisesDescriptions,
+    retrieveCurrentSoreness,
+    retrieveSorenessHistory,
+    retrieveMusclesWithLastWorkoutTime,
+    insertMuscle,
+    insertExercise,
+    updateExercise,
+    removeExercise,
+    uploadFileForExercise,
+    toggleExercise,
+    changeIntensity,
+    updateSoreness,
+    commitWorkout,
+    Connection,
   )
 where
 
-import Control.Applicative (pure)
+import Control.Applicative (pure, (<*>))
 import Control.Exception (catch)
-import Control.Monad (mapM_)
+import Control.Monad (mapM_, when)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Data.Bool (Bool (True))
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
+import Data.Eq (Eq ((==)))
 import Data.Foldable (forM_, for_)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
-import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
-import Data.Int (Int)
+import Data.IORef (newIORef, readIORef)
+import Data.Int (Int, Int64)
 import Data.List (head)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, listToMaybe)
 import Data.Monoid (mempty)
-import Data.Ord (Ord)
+import Data.Ord (Ord ((<=)), (>))
 import Data.Semigroup ((<>))
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.String (String)
 import Data.Text (Text, pack, unpack)
+import Data.Time (UTCTime)
 import Data.Tuple (uncurry)
-import Database.SQLite.Simple (Connection, Only (Only, fromOnly), Query, SQLError, ToRow, close, execute, execute_, lastInsertRowId, open, query, query_, withTransaction)
-import Myocardio.Database qualified as DatabaseJson
-import Myocardio.Database qualified as OldDb
+import Database.SQLite.Simple (Connection, Only (Only, fromOnly), Query, SQLError, ToRow, changes, close, execute, execute_, lastInsertRowId, open, query, query_, withTransaction)
+import Myocardio.DatabaseOld qualified as DatabaseJson
+import Myocardio.DatabaseOld qualified as OldDb
+import Myocardio.MapUtils (insertMMap, insertMSet, multiInsertMMap)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment.XDG.BaseDir (getUserConfigDir, getUserDataDir)
 import System.IO (FilePath, IO)
 import Text.Show (Show, show)
 import UnliftIO.Exception (bracket)
 import Prelude (error)
+
+type IdType = Int64
+
+data Muscle = Muscle {id :: !IdType, name :: !Text} deriving (Show)
+
+instance Eq Muscle where
+  m1 == m2 = m1.id == m2.id
+
+instance Ord Muscle where
+  m1 <= m2 = m1.id <= m2.id
+
+data ExerciseWorkout = ExerciseWorkout
+  { exerciseId :: !IdType,
+    time :: !UTCTime,
+    committed :: !Bool,
+    intensity :: !Text
+  }
+  -- We need Ord because we want to store it in a multi map
+  deriving (Show, Eq, Ord)
+
+data ExerciseWithWorkouts = ExerciseWithWorkouts
+  { id :: !IdType,
+    muscles :: !(Set.Set Muscle),
+    description :: !Text,
+    name :: !Text,
+    fileIds :: !(Set IdType),
+    workouts :: !(Set ExerciseWorkout)
+  }
+  deriving (Show)
+
+data MuscleWithWorkout = MuscleWithWorkout
+  { muscleId :: !IdType,
+    muscleName :: !Text,
+    workoutTime :: !UTCTime
+  }
+
+data Soreness = Soreness
+  { muscleId :: !IdType,
+    muscleName :: !Text,
+    soreness :: !Int,
+    time :: !UTCTime
+  }
+  deriving (Show)
+
+notSore :: Int
+notSore = 0
+
+littleSore :: Int
+littleSore = 1
+
+verySore :: Int
+verySore = 2
+
+data ExerciseDescription = ExerciseDescription
+  { id :: !IdType,
+    muscles :: !(Set.Set Muscle),
+    description :: !Text,
+    name :: !Text,
+    fileIds :: !(Set IdType)
+  }
+  deriving (Show)
 
 checkVersionNumber :: (MonadIO m) => Connection -> m (Maybe Int)
 checkVersionNumber connection =
@@ -71,22 +158,16 @@ createDatabaseV1 connection =
       [ "CREATE TABLE IF NOT EXISTS Version ( version INTEGER NOT NULL )",
         "CREATE TABLE IF NOT EXISTS Exercise ( id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL )",
         "CREATE TABLE IF NOT EXISTS Muscle ( id INTEGER PRIMARY KEY, name TEXT NOT NULL )",
-        "CREATE TABLE IF NOT EXISTS ExerciseHasMuscle ( exercise_id INTEGER NOT NULL, muscle_id INTEGER NOT NULL, FOREIGN KEY (exercise_id) REFERENCES Exercise(id), FOREIGN KEY (muscle_id) REFERENCES Muscle(id) )",
-        "CREATE TABLE IF NOT EXISTS ExerciseHasFile ( id INTEGER PRIMARY KEY, exercise_id INTEGER NOT NULL, file_content BLOB NOT NULL, FOREIGN KEY (exercise_id) REFERENCES Exercise(id) )",
-        "CREATE TABLE IF NOT EXISTS ExerciseWithIntensity ( exercise_id INTEGER NOT NULL, intensity TEXT NOT NULL, time INTEGER NOT NULL, committed INTEGER NOT NULL, FOREIGN KEY (exercise_id) REFERENCES Exercise(id) )",
-        "CREATE TABLE IF NOT EXISTS Soreness ( muscle_id INTEGER NOT NULL, soreness INTEGER NOT NULL, time INTEGER NOT NULL, FOREIGN KEY (muscle_id) REFERENCES Muscle(id) )"
+        "CREATE TABLE IF NOT EXISTS ExerciseHasMuscle ( exercise_id INTEGER NOT NULL, muscle_id INTEGER NOT NULL, FOREIGN KEY (exercise_id) REFERENCES Exercise(id) ON DELETE CASCADE, FOREIGN KEY (muscle_id) REFERENCES Muscle(id) ON DELETE CASCADE )",
+        "CREATE TABLE IF NOT EXISTS ExerciseHasFile ( id INTEGER PRIMARY KEY, exercise_id INTEGER NOT NULL, file_content BLOB NOT NULL, FOREIGN KEY (exercise_id) REFERENCES Exercise(id) ON DELETE CASCADE )",
+        "CREATE TABLE IF NOT EXISTS ExerciseWithIntensity ( exercise_id INTEGER NOT NULL, intensity TEXT NOT NULL, time INTEGER NOT NULL, committed INTEGER NOT NULL, FOREIGN KEY (exercise_id) REFERENCES Exercise(id) ON DELETE CASCADE )",
+        "CREATE TABLE IF NOT EXISTS Soreness ( muscle_id INTEGER NOT NULL, soreness INTEGER NOT NULL, time INTEGER NOT NULL, FOREIGN KEY (muscle_id) REFERENCES Muscle(id) ON DELETE CASCADE )"
       ]
 
 getUploadedFileDir :: (MonadIO m) => m FilePath
 getUploadedFileDir = do
   uploadedFilesBaseDir <- liftIO $ getUserDataDir "myocardio3"
   pure (uploadedFilesBaseDir <> "/uploaded-files")
-
-insertMMap :: (Ord k) => IORef (Map.Map k a) -> k -> a -> IO ()
-insertMMap ref key value = modifyIORef ref (Map.insert key value)
-
-insertMSet :: (Ord a) => IORef (Set.Set a) -> a -> IO ()
-insertMSet ref value = modifyIORef ref (Set.insert value)
 
 migrateFromJson :: (MonadIO m) => Connection -> m ()
 migrateFromJson connection = do
@@ -147,12 +228,17 @@ migrateFromJson connection = do
         Just exerciseId -> do
           run "INSERT INTO ExerciseWithIntensity (exercise_id, intensity, time, committed) VALUES (?, ?, ?, ?)" (exerciseId, OldDb.getIntensity exerciseWithIntensity.intensity, exerciseWithIntensity.time, 1 :: Int)
 
-migrateDatabase :: (MonadIO m) => Connection -> m ()
-migrateDatabase connection = do
+data MigrationFlags = MigrateFromJson | NoJson
+
+migrateDatabase :: (MonadIO m) => Connection -> MigrationFlags -> m ()
+migrateDatabase connection flags = do
   version <- checkVersionNumber connection
   createDatabaseV1 connection
   case version of
-    Nothing -> migrateFromJson connection
+    Nothing ->
+      case flags of
+        MigrateFromJson -> migrateFromJson connection
+        NoJson -> pure ()
     Just 1 -> pure ()
     Just v -> error $ "invalid version stored in DB: expected 1, got " <> show v
 
@@ -167,136 +253,141 @@ withDatabase f = do
   liftIO $ createDirectoryIfMissing True configBaseDir
   withConnection (configBaseDir <> "/" <> "db.sqlite") \connection -> do
     liftIO (execute_ connection "PRAGMA foreign_keys = ON;")
-    migrateDatabase connection
+    migrateDatabase connection MigrateFromJson
     f connection
 
-data ExerciseWithIntensity = ExerciseWithIntensity
-  { id :: Int,
-    muscles :: !(Set.Set Text),
-    description :: !Text,
-    name :: !Text,
-    fileIds :: !(Set Int),
-    intensity :: Text
-  }
-  deriving (Show)
+openDatabase :: (MonadIO m) => String -> m Connection
+openDatabase url = liftIO (open url)
 
-multiInsert :: (Ord k, Ord p) => k -> p -> Map.Map k (Set.Set p) -> Map.Map k (Set.Set p)
-multiInsert key newValue = Map.alter alterer key
-  where
-    alterer Nothing = Just (Set.singleton newValue)
-    alterer (Just oldSet) = Just (Set.insert newValue oldSet)
-
-multiInsertMMap :: (Ord k, Ord p) => IORef (Map.Map k (Set.Set p)) -> k -> p -> IO ()
-multiInsertMMap ref key newValue = modifyIORef ref (multiInsert key newValue)
-
-data Soreness = Soreness
-  { muscle :: !Text,
-    soreness :: !Int
-  }
-  deriving (Show)
+closeDatabase :: (MonadIO m) => Connection -> m ()
+closeDatabase = liftIO . close
 
 -- For every muscle, calculate the latest soreness value
-retrieveSoreness :: Connection -> IO [Soreness]
-retrieveSoreness connection = do
+retrieveCurrentSoreness :: forall m. (MonadIO m) => Connection -> m [Soreness]
+retrieveCurrentSoreness connection = do
   -- Courtesy of
   -- https://stackoverflow.com/questions/17327043/how-can-i-select-rows-with-most-recent-timestamp-for-each-key-value
   results <-
-    query_
-      connection
-      "SELECT \
-      \ M.name, L.muscle_id, L.soreness \
-      \ FROM Soreness L \
-      \ LEFT JOIN Soreness R ON L.muscle_id = R.muscle_id AND L.time < R.time \
-      \ INNER JOIN Muscle M ON M.id == L.muscle_id \
-      \ WHERE R.muscle_id IS NULL AND L.soreness > 0" ::
-      IO [(Text, Int, Int)]
+    liftIO $
+      query_
+        connection
+        "SELECT \
+        \ M.name, L.muscle_id, L.soreness, L.time \
+        \ FROM Soreness L \
+        \ LEFT JOIN Soreness R ON L.muscle_id = R.muscle_id AND L.time < R.time \
+        \ INNER JOIN Muscle M ON M.id == L.muscle_id \
+        \ WHERE R.muscle_id IS NULL AND L.soreness > 0" ::
+      m [(Text, IdType, Int, UTCTime)]
 
-  pure ((\(muscleName, _muscleId, soreness) -> Soreness muscleName soreness) <$> results)
+  pure ((\(muscleName, muscleId, soreness, time) -> Soreness muscleId muscleName soreness time) <$> results)
+
+-- Calculate all soreness values and return as a flat list - the user
+-- can filter group as they see fit
+retrieveSorenessHistory :: forall m. (MonadIO m) => Connection -> m [Soreness]
+retrieveSorenessHistory connection = do
+  results <-
+    liftIO $
+      query_
+        connection
+        "SELECT \
+        \ M.name, L.muscle_id, L.soreness, L.time \
+        \ FROM Soreness L \
+        \ INNER JOIN Muscle M ON M.id == L.muscle_id" ::
+      m [(Text, IdType, Int, UTCTime)]
+
+  pure ((\(muscleName, muscleId, soreness, time) -> Soreness muscleId muscleName soreness time) <$> results)
 
 data ExerciseCommitted = Committed | NotCommitted
 
-retrieveExercisesWithCurrentIntensity :: Connection -> ExerciseCommitted -> IO [ExerciseWithIntensity]
-retrieveExercisesWithCurrentIntensity conn committed = do
-  results <-
-    query
-      conn
-      "SELECT E.id, E.description, E.name, M.name muscle_name, F.id file_id, WI.intensity \
-      \  FROM Exercise as E \
-      \  LEFT JOIN ExerciseHasMuscle ON E.id = ExerciseHasMuscle.exercise_id \
-      \  LEFT JOIN Muscle M ON M.id = ExerciseHasMuscle.muscle_id \
-      \  LEFT JOIN ExerciseHasFile F ON E.id = F.exercise_id \
-      \  LEFT JOIN ExerciseWithIntensity WI ON E.id = WI.exercise_id \
-      \  WHERE WI.committed = ?"
-      (Only @Int (case committed of Committed -> 1; NotCommitted -> 0)) ::
-      IO [(Int, Text, Text, Maybe Text, Maybe Int, Maybe Text)]
+-- TODO: Add muscle group filter here
+retrieveExercisesWithWorkouts :: forall m. (MonadIO m) => Connection -> Maybe ExerciseCommitted -> m [ExerciseWithWorkouts]
+retrieveExercisesWithWorkouts conn committedFilterMaybe = liftIO $ do
+  let queryBase =
+        "SELECT E.id, E.description, E.name, M.id muscle_id, M.name muscle_name, F.id file_id, WI.intensity, WI.time, WI.committed \
+        \  FROM Exercise as E \
+        \  LEFT JOIN ExerciseHasMuscle ON E.id = ExerciseHasMuscle.exercise_id \
+        \  LEFT JOIN Muscle M ON M.id = ExerciseHasMuscle.muscle_id \
+        \  LEFT JOIN ExerciseHasFile F ON E.id = F.exercise_id \
+        \  LEFT JOIN ExerciseWithIntensity WI ON E.id = WI.exercise_id"
+      finalStatement :: IO [(IdType, Text, Text, Maybe IdType, Maybe Text, Maybe IdType, Maybe Text, Maybe UTCTime, Maybe Int)]
+      finalStatement = case committedFilterMaybe of
+        Nothing -> query_ conn queryBase
+        Just committedFilter ->
+          query
+            conn
+            (queryBase <> " WHERE WI.committed = ?")
+            (Only @Int (case committedFilter of Committed -> 1; NotCommitted -> 0))
 
+  results <- finalStatement
   exerciseDataRef <- newIORef mempty
   exerciseMusclesByIdRef <- newIORef mempty
   exerciseFilesByIdRef <- newIORef mempty
-  exerciseToIntensityRef <- newIORef mempty
-  forM_ results \(exId, exDescription, exName, muName, fileId, intensity) -> do
+  exerciseToWorkoutsRef <- newIORef mempty
+  forM_ results \(exId, exDescription, exName, muId, muName, fileId, intensity, time, committed) -> do
     insertMSet exerciseDataRef (exId, exDescription, exName)
 
-    for_ muName (multiInsertMMap exerciseMusclesByIdRef exId)
+    for_ ((,) <$> muId <*> muName) (multiInsertMMap exerciseMusclesByIdRef exId . uncurry Muscle)
     for_ fileId (multiInsertMMap exerciseFilesByIdRef exId)
 
-    for_ intensity (insertMMap exerciseToIntensityRef exId)
+    for_
+      ( ( \intensity' time' committed' ->
+            ExerciseWorkout
+              { exerciseId = exId,
+                time = time',
+                committed = committed' > 0,
+                intensity = intensity'
+              }
+        )
+          <$> intensity
+          <*> time
+          <*> committed
+      )
+      (multiInsertMMap exerciseToWorkoutsRef exId)
 
   exerciseData <- readIORef exerciseDataRef
   exerciseMusclesById <- readIORef exerciseMusclesByIdRef
   exerciseFilesById <- readIORef exerciseFilesByIdRef
-  exerciseToIntensity <- readIORef exerciseToIntensityRef
+  exerciseToWorkouts <- readIORef exerciseToWorkoutsRef
 
   pure
     ( ( \(exId, exDescription, exName) ->
-          ExerciseWithIntensity
+          ExerciseWithWorkouts
             { id = exId,
               description = exDescription,
               name = exName,
               muscles = fromMaybe mempty (Map.lookup exId exerciseMusclesById),
               fileIds = fromMaybe mempty (Map.lookup exId exerciseFilesById),
-              intensity = fromMaybe "N/A" (Map.lookup exId exerciseToIntensity)
+              workouts = fromMaybe mempty (Map.lookup exId exerciseToWorkouts)
             }
       )
         <$> Set.toList exerciseData
     )
 
-data Muscle = Muscle {id :: Int, name :: Text} deriving (Show)
-
-retrieveAllMuscles :: Connection -> IO [Muscle]
-retrieveAllMuscles connection = do
-  results <- query_ connection "SELECT id, name FROM Muscle ORDER BY name ASC" :: IO [(Int, Text)]
+retrieveAllMuscles :: forall m. (MonadIO m) => Connection -> m [Muscle]
+retrieveAllMuscles connection = liftIO do
+  results <- query_ connection "SELECT id, name FROM Muscle ORDER BY name ASC" :: IO [(IdType, Text)]
   pure (uncurry Muscle <$> results)
 
-data ExerciseDescription = ExerciseDescription
-  { id :: Int,
-    muscles :: !(Set.Set Text),
-    description :: !Text,
-    name :: !Text,
-    fileIds :: !(Set Int)
-  }
-  deriving (Show)
-
-retrieveExercisesDescriptions :: Connection -> IO [ExerciseDescription]
-retrieveExercisesDescriptions conn = do
+retrieveExercisesDescriptions :: forall m. (MonadIO m) => Connection -> m [ExerciseDescription]
+retrieveExercisesDescriptions conn = liftIO do
   results <-
     query_
       conn
-      "SELECT E.id, E.description, E.name, M.name muscle_name, F.id file_id \
+      "SELECT E.id, E.description, E.name, M.id muscle_id, M.name muscle_name, F.id file_id \
       \  FROM Exercise as E \
       \  LEFT JOIN ExerciseHasMuscle ON E.id = ExerciseHasMuscle.exercise_id \
       \  LEFT JOIN Muscle M ON M.id = ExerciseHasMuscle.muscle_id \
       \  LEFT JOIN ExerciseHasFile F ON E.id = F.exercise_id \
       \  ORDER BY E.name ASC" ::
-      IO [(Int, Text, Text, Maybe Text, Maybe Int)]
+      IO [(IdType, Text, Text, Maybe IdType, Maybe Text, Maybe IdType)]
 
   exerciseDataRef <- newIORef mempty
   exerciseMusclesByIdRef <- newIORef mempty
   exerciseFilesByIdRef <- newIORef mempty
-  forM_ results \(exId, exDescription, exName, muName, fileId) -> do
+  forM_ results \(exId, exDescription, exName, muId, muName, fileId) -> do
     insertMSet exerciseDataRef (exId, exDescription, exName)
 
-    for_ muName (multiInsertMMap exerciseMusclesByIdRef exId)
+    for_ ((,) <$> muId <*> muName) (multiInsertMMap exerciseMusclesByIdRef exId . uncurry Muscle)
     for_ fileId (multiInsertMMap exerciseFilesByIdRef exId)
 
   exerciseData <- readIORef exerciseDataRef
@@ -316,5 +407,77 @@ retrieveExercisesDescriptions conn = do
         <$> Set.toList exerciseData
     )
 
-retrieveFile :: Connection -> Int -> IO BSL.ByteString
-retrieveFile conn fileId = (fromOnly . head) <$> (query conn "SELECT file_content FROM ExerciseHasFile WHERE id = ?" (Only fileId))
+-- retrieveExerciseHistoryForMuscle :: Connection -> Muscle -> IO []
+retrieveFile :: forall m. (MonadIO m) => Connection -> IdType -> m BSL.ByteString
+retrieveFile conn fileId = liftIO (fromOnly . head <$> query conn "SELECT file_content FROM ExerciseHasFile WHERE id = ?" (Only fileId))
+
+uploadFileForExercise :: forall m. (MonadIO m) => Connection -> IdType -> BSL.ByteString -> m IdType
+uploadFileForExercise connection exerciseId content = liftIO do
+  execute connection "INSERT INTO ExerciseHasFile (exercise_id, file_content) VALUES (?, ?)" (exerciseId, content)
+  lastInsertRowId connection
+
+retrieveMusclesWithLastWorkoutTime :: forall m. (MonadIO m) => Connection -> m [MuscleWithWorkout]
+retrieveMusclesWithLastWorkoutTime conn = liftIO do
+  results <- query_ conn "SELECT EHM.muscle_id, Muscle.name, MAX(EWI.time) FROM ExerciseWithIntensity EWI INNER JOIN ExerciseHasMuscle EHM ON (EWI.exercise_id = EHM.exercise_id) INNER JOIN Muscle ON Muscle.id = EHM.muscle_id GROUP BY EHM.muscle_id" :: IO [(IdType, Text, UTCTime)]
+  pure
+    ( ( \(muscleId, muscleName, time) ->
+          MuscleWithWorkout
+            { muscleId = muscleId,
+              workoutTime = time,
+              muscleName = muscleName
+            }
+      )
+        <$> results
+    )
+
+removeExercise :: forall m. (MonadIO m) => Connection -> IdType -> m ()
+removeExercise conn exerciseId = liftIO (execute conn "DELETE FROM Exercise WHERE id = ?" (Only exerciseId))
+
+insertMuscle :: forall m. (MonadIO m) => Connection -> Text -> m IdType
+insertMuscle conn name = liftIO do
+  execute conn "INSERT INTO Muscle (name) VALUES (?)" (Only name)
+  lastInsertRowId conn
+
+insertExercise :: forall m. (MonadIO m) => Connection -> Set.Set IdType -> Text -> Text -> [BSL.ByteString] -> m IdType
+insertExercise conn muscles name description files = liftIO do
+  execute conn "INSERT INTO Exercise (name, description) VALUES (?, ?)" (name, description)
+  exerciseId <- lastInsertRowId conn
+  forM_ muscles \muscle ->
+    execute conn "INSERT INTO ExerciseHasMuscle (exercise_id, muscle_id) VALUES (?, ?)" (exerciseId, muscle)
+  forM_ files \file -> execute conn "INSERT INTO ExerciseHasFile (exercise_id, file_content) VALUES (?, ?)" (exerciseId, file)
+  pure exerciseId
+
+updateExercise :: forall m. (MonadIO m) => Connection -> IdType -> Set.Set Muscle -> Text -> Text -> [BSL.ByteString] -> [IdType] -> m ()
+updateExercise conn exerciseId muscles name description newFiles deleteOldFiles = liftIO do
+  execute conn "UPDATE Exercise SET name = ?, description = ? WHERE id = ?" (name, description, exerciseId)
+  execute conn "DELETE FROM ExerciseHasMuscle WHERE exercise_id = ?" (Only exerciseId)
+  forM_ muscles \muscle ->
+    execute conn "INSERT INTO ExerciseHasMuscle (exercise_id, muscle_id) VALUES (?, ?)" (exerciseId, muscle.id)
+  forM_ deleteOldFiles \oldFileId ->
+    execute conn "DELETE FROM ExerciseHasFile WHERE exercise_id = ? AND file_id = ?" (exerciseId, oldFileId)
+  forM_ newFiles \file ->
+    execute conn "INSERT INTO ExerciseHasFile (exercise_id, file_content) VALUES (?, ?)" (exerciseId, file)
+
+toggleExercise :: forall m. (MonadIO m) => Connection -> IdType -> UTCTime -> Text -> m ()
+toggleExercise conn exerciseId currentTime intensity = liftIO do
+  execute conn "DELETE FROM ExerciseWithIntensity WHERE exercise_id = ? AND committed = ?" (exerciseId, 0 :: Int)
+  numberOfDeletions <- changes conn
+  when
+    (numberOfDeletions == 0)
+    ( execute
+        conn
+        "INSERT INTO ExerciseWithIntensity (exercise_id, intensity, time, committed) VALUES (?, ?, ?, ?)"
+        (exerciseId, intensity, currentTime, 0 :: Int)
+    )
+
+changeIntensity :: forall m. (MonadIO m) => Connection -> IdType -> Text -> m ()
+changeIntensity conn exerciseId intensity = liftIO do
+  execute conn "UPDATE ExerciseWithIntensity SET intensity = ? WHERE exerciseId = ? AND committed = ?" (intensity, exerciseId, 0 :: Int)
+
+updateSoreness :: forall m. (MonadIO m) => Connection -> IdType -> Int -> UTCTime -> m ()
+updateSoreness conn muscleId soreness currentTime = liftIO do
+  execute conn "INSERT INTO Soreness (muscle_id, soreness, time) VALUES (?, ?, ?)" (muscleId, soreness, currentTime)
+
+commitWorkout :: forall m. (MonadIO m) => Connection -> m ()
+commitWorkout conn = liftIO do
+  execute conn "UPDATE ExerciseWithIntensity SET committed = ?" (Only (1 :: Int))
