@@ -20,7 +20,7 @@ module Views
 where
 
 import CMarkGFM (commonmarkToHtml)
-import Control.Monad (unless, (>>=))
+import Control.Monad (unless, when, (>>=))
 import Data.Bool (Bool (True), not, otherwise)
 import Data.Eq (Eq, (==))
 import Data.Foldable (Foldable (elem), any, find, foldMap, forM_, for_, mapM_)
@@ -264,7 +264,7 @@ viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
             iconHtml "trash"
             L.span_ "Remove from workout"
       L.form_ [L.action_ "/change-intensity", L.method_ "post"] do
-        L.input_ [L.type_ "hidden", L.name_ "exercise-name", L.value_ (packShow exWithIn.name)]
+        L.input_ [L.type_ "hidden", L.name_ "exercise-id", L.value_ (packShow exWithIn.id)]
         for_ (Set.lookupMin exWithIn.workouts) \(ExerciseWorkout {intensity}) ->
           L.input_
             [ L.class_ "form-control form-control-sm mb-1",
@@ -362,8 +362,7 @@ viewSingleExerciseInChooser currentTime muscle' sorenessHistory exerciseWithWork
         L.value_ (packShow exerciseWithWorkouts.id)
       ]
     L.div_ [L.class_ "mb-3 card"] do
-      -- FIXME
-      -- viewExerciseImageCarousel exercise
+      viewExerciseImageCarousel exerciseWithWorkouts
       L.div_ [L.class_ "card-body"] do
         L.h5_ [L.class_ "card-title"] do
           L.span_ $ L.toHtml exerciseWithWorkouts.name
@@ -488,20 +487,16 @@ idExerciseForm :: HtmlId
 idExerciseForm = HtmlId "new-exercise-form"
 
 viewExerciseFormHtml :: [DBN.Muscle] -> DBN.ExerciseDescription -> L.Html ()
-viewExerciseFormHtml allMuscles' (DBN.ExerciseDescription {name, muscles, fileIds, description}) =
+viewExerciseFormHtml allMuscles' (DBN.ExerciseDescription {id, name, muscles, fileIds, description}) =
   L.form_ [L.enctype_ "multipart/form-data", L.method_ "post", L.action_ "/edit-exercise"] do
-    L.input_
-      [ L.type_ "hidden",
-        L.name_ "original-exercise-name",
-        L.value_ (packShow name)
-      ]
+    when (id > 0) (L.input_ [L.type_ "hidden", L.name_ "exercise-id", L.value_ (packShow id)])
     L.div_ [L.class_ "form-floating mb-3"] do
       L.input_
         [ L.class_ "form-control",
           L.id_ "exercise-name",
           L.type_ "text",
           L.name_ exerciseFormNameParam,
-          L.value_ (packShow name)
+          L.value_ name
         ]
       L.label_ [L.for_ "exercise-name"] "Name"
 
@@ -509,16 +504,15 @@ viewExerciseFormHtml allMuscles' (DBN.ExerciseDescription {name, muscles, fileId
     L.div_ [L.class_ "mb-3"] $ forM_ allMuscles' \muscle' -> do
       L.input_
         [ L.class_ "btn-check",
-          L.id_ ("muscle-" <> htmlIdFromText muscle'.name),
+          L.id_ ("muscle-" <> packShow muscle'.id),
           L.type_ "checkbox",
           L.name_ exerciseFormMusclesParam,
-          L.value_ muscle'.name,
+          L.value_ (packShow muscle'.id),
           if muscle' `elem` muscles then L.checked_ else mempty
         ]
       L.label_
-        [L.for_ ("muscle-" <> packShow muscle'), L.class_ "btn btn-outline-secondary me-2"]
-        $ L.toHtml
-        $ packShow muscle'
+        [L.for_ ("muscle-" <> packShow muscle'.id), L.class_ "btn btn-outline-secondary me-2"]
+        $ L.toHtml muscle'.name
 
     L.textarea_
       [ L.class_ "form-control mb-3",
@@ -599,23 +593,23 @@ viewExerciseList allMuscles' exercises existingExercise = do
     iconHtml "box2-heart"
     L.span_ "Exercise Descriptions"
   forM_ exercises \exercise' -> do
-    L.h3_ [L.id_ ("description-" <> htmlIdFromText (packShow exercise'.name)), L.class_ "d-flex"] do
+    L.h3_ [L.id_ ("description-" <> htmlIdFromText exercise'.name), L.class_ "d-flex"] do
       L.form_ [L.action_ "/exercises"] do
-        L.input_ [L.type_ "hidden", L.name_ "edit-exercise", L.value_ (packShow exercise'.name)]
+        L.input_ [L.type_ "hidden", L.name_ "edit-exercise", L.value_ (packShow exercise'.id)]
         L.button_
           [ L.class_ "btn btn-sm btn-secondary me-2",
             L.type_ "submit"
           ]
           (iconHtml' "pencil-square")
-      L.form_ [L.action_ ("/remove-exercise/" <> packShow exercise'.name)] do
+      L.form_ [L.action_ ("/remove-exercise/" <> packShow exercise'.id)] do
         L.button_
           [ L.class_ "btn btn-sm btn-danger me-2",
             L.type_ "submit"
           ]
           (iconHtml' "trash-fill")
-      L.toHtml (packShow exercise'.name)
+      L.toHtml exercise'.name
     L.div_ [L.class_ "gap-1 mb-3"] do
-      forM_ exercise'.muscles \muscle' -> L.span_ [L.class_ "badge text-bg-info me-1"] (L.toHtml $ packShow muscle')
+      forM_ exercise'.muscles \muscle' -> L.span_ [L.class_ "badge text-bg-info me-1"] (L.toHtml muscle'.name)
     L.div_ [L.class_ "alert alert-light"] (viewExerciseDescriptionHtml exercise')
 
 viewExerciseHistory :: UTCTime -> [MuscleWithWorkout] -> L.Html ()

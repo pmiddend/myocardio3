@@ -431,7 +431,11 @@ retrieveMusclesWithLastWorkoutTime conn = liftIO do
     )
 
 removeExercise :: forall m. (MonadIO m) => Connection -> IdType -> m ()
-removeExercise conn exerciseId = liftIO (execute conn "DELETE FROM Exercise WHERE id = ?" (Only exerciseId))
+removeExercise conn exerciseId = liftIO do
+  execute conn "DELETE FROM ExerciseHasMuscle WHERE exercise_id = ?" (Only exerciseId)
+  execute conn "DELETE FROM ExerciseHasFile WHERE exercise_id = ?" (Only exerciseId)
+  execute conn "DELETE FROM ExerciseWithIntensity WHERE exercise_id = ?" (Only exerciseId)
+  execute conn "DELETE FROM Exercise WHERE id = ?" (Only exerciseId)
 
 insertMuscle :: forall m. (MonadIO m) => Connection -> Text -> m IdType
 insertMuscle conn name = liftIO do
