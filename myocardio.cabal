@@ -29,18 +29,19 @@ common shared-properties
   
 library
   import: shared-properties, warnings
-  exposed-modules: Myocardio.Database, Myocardio.DatabaseNew
+  exposed-modules: Myocardio.DatabaseNew
+                 , Myocardio.DatabaseOld
+                 , Myocardio.MapUtils
   build-depends:    base ^>=4.18.2.1
                   , aeson
                   , text
                   , time
                   , xdg-basedir
-                  , directory
                   , safe
                   , unliftio
+                  , directory
                   , unliftio-core
                   , containers
-                  , directory
                   , sqlite-simple
                   , bytestring
   hs-source-dirs:   lib
@@ -68,17 +69,12 @@ executable myocardio-exe
     , text
     , time
     , scotty
-    , cryptohash-sha256
     , wai-extra
     , split
-    , base16-bytestring
-    , xdg-basedir
-    , directory
     , bytestring
     , containers
     , wai-middleware-static
     , safe
-    , directory
     , lucid2
     , cmark-gfm
     , http-types
@@ -96,6 +92,7 @@ test-suite myocardio-tests
     tasty,
     tasty-hunit,
     temporary,
+    containers,
     directory,
     safe,
     filepath,

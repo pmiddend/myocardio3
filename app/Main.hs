@@ -8,56 +8,55 @@
 module Main (main) where
 
 import Control.Applicative (Applicative (pure))
+import Control.Monad (void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Crypto.Hash.SHA256 (hashlazy)
+import Data.Bifunctor (first)
 import Data.Bool (Bool (True))
-import Data.ByteString.Base16 qualified as Base16
 import Data.ByteString.Lazy qualified as BSL
 import Data.Eq (Eq ((/=)), (==))
-import Data.Foldable (find, forM_, notElem)
+import Data.Foldable (find, foldMap)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
-import Data.List (filter, lookup)
+import Data.List (filter)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (Maybe (Just, Nothing), mapMaybe, maybe)
+import Data.Maybe (Maybe (Just, Nothing), mapMaybe)
 import Data.Monoid (mempty)
 import Data.Semigroup (Semigroup ((<>)))
-import Data.Text (Text, pack, unpack)
-import Data.Text qualified as Text
-import Data.Text.Encoding qualified as TE
+import Data.Set qualified as Set
+import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
 import Data.Time.Clock (getCurrentTime)
+import Data.Traversable (sequence, traverse)
 import Lucid (renderText)
-import Myocardio.Database
-  ( Category,
-    Exercise (Exercise, category, description, fileReferences, muscles, name),
-    ExerciseName (ExerciseName),
-    FileReference (FileReference),
-    Intensity (Intensity),
-    Muscle,
-    SorenessValue (NotSore),
-    addExercise,
-    addSoreness,
+import Myocardio.DatabaseNew
+  ( ExerciseCommitted (NotCommitted),
+    ExerciseDescription (ExerciseDescription, description, fileIds, id, muscles, name),
+    IdType,
+    Muscle (id),
     changeIntensity,
     commitWorkout,
-    getHomeDbFile,
-    modifyExercise,
-    readDatabase,
+    insertExercise,
+    notSore,
     removeExercise,
+    retrieveAllMuscles,
+    retrieveCurrentSoreness,
+    retrieveExercisesDescriptions,
+    retrieveExercisesWithWorkouts,
+    retrieveFile,
+    retrieveSorenessHistory,
     toggleExercise,
+    updateExercise,
+    updateSoreness,
+    withDatabase,
   )
-import Myocardio.DatabaseNew qualified as DBN
 import Network.HTTP.Types.Status (status400)
 import Network.Wai.Middleware.Static (addBase, isNotAbsolute, noDots, staticPolicy)
 import Network.Wai.Parse (FileInfo (fileContent, fileName))
-import System.Directory (createDirectoryIfMissing, removeFile)
-import System.Environment (getEnvironment)
-import System.Environment.XDG.BaseDir (getUserDataDir)
-import System.IO (FilePath, IO, putStrLn)
+import System.IO (FilePath, IO)
 import Util (packShowLazy)
-import Views (exerciseFormCategoryParam, exerciseFormDescriptionParam, exerciseFormFilesToDeleteParam, exerciseFormMusclesParam, exerciseFormNameParam, viewChooseOuter, viewConcreteMuscleGroupExercisesOuter, viewExerciseDeletion, viewExerciseListOuter, viewPageCurrentHtml, viewStats)
-import Web.Scotty (ActionM, File, Parsable (parseParam, parseParamList), capture, file, files, finish, formParam, formParamMaybe, formParams, get, html, middleware, pathParam, post, queryParamMaybe, raw, readEither, redirect, scotty, status, text)
-import Prelude (Either (Left, Right), Traversable (traverse))
+import Views (exerciseFormDescriptionParam, exerciseFormFilesToDeleteParam, exerciseFormMusclesParam, exerciseFormNameParam, viewChooseOuter, viewConcreteMuscleGroupExercisesOuter, viewExerciseDeletion, viewExerciseListOuter, viewPageCurrentHtml)
+import Web.Scotty (ActionM, Parsable (parseParam, parseParamList), capture, files, finish, formParam, formParamMaybe, formParams, get, html, middleware, pathParam, post, queryParamMaybe, raw, redirect, scotty, status, text)
+import Prelude (Either (Left, Right))
 
 instance (Parsable a) => Parsable (NE.NonEmpty a) where
   parseParam v =
@@ -67,67 +66,58 @@ instance (Parsable a) => Parsable (NE.NonEmpty a) where
         Nothing -> Left "list with no elements"
         Just nonEmptyList -> Right nonEmptyList
 
-instance Parsable Muscle where
-  parseParam = readEither
+paramValues :: forall a. (Parsable a) => Text -> ActionM (Either Text [a])
+paramValues desiredParamName = do
+  formParams' <- formParams
+  let parsedParams :: [Either TL.Text a]
+      parsedParams =
+        mapMaybe
+          ( \(paramName, paramValue) ->
+              if paramName == desiredParamName then Just (parseParam (TL.fromStrict paramValue)) else Nothing
+          )
+          formParams'
+  pure (first TL.toStrict (sequence parsedParams))
 
-instance Parsable Category where
-  parseParam = readEither
-
-instance Parsable SorenessValue where
-  parseParam = readEither
-
-instance Parsable Intensity where
-  parseParam = Right . Intensity . TL.toStrict
-
-instance Parsable ExerciseName where
-  parseParam = Right . ExerciseName . TL.toStrict
-
-getUploadedFileDir :: (MonadIO m) => m FilePath
-getUploadedFileDir = do
-  uploadedFilesBaseDir <- liftIO $ getUserDataDir "myocardio3"
-  pure (uploadedFilesBaseDir <> "/uploaded-files")
-
-uploadSingleFile :: (MonadIO m) => File BSL.ByteString -> m FileReference
-uploadSingleFile (_, fileInfo) = do
-  let fileHashText :: Text
-      fileHashText = TE.decodeUtf8 $ Base16.encode (hashlazy (fileContent fileInfo))
-  liftIO $ do
-    uploadedFileDir <- getUploadedFileDir
-    createDirectoryIfMissing True uploadedFileDir
-    BSL.writeFile (uploadedFileDir <> "/" <> unpack fileHashText) (fileContent fileInfo)
-  pure (FileReference fileHashText)
-
-paramValues :: Text -> ActionM [Text]
-paramValues desiredParamName =
-  mapMaybe
-    (\(paramName, paramValue) -> if paramName == desiredParamName then Just paramValue else Nothing)
-    <$> formParams
+paramValuesNE :: (Parsable a) => Text -> ActionM (Either Text (NE.NonEmpty a))
+paramValuesNE name = do
+  result <- paramValues name
+  case result of
+    Left e -> pure (Left e)
+    Right result' ->
+      case NE.nonEmpty result' of
+        Nothing -> pure (Left $ "couldn't find parameter \"" <> name <> "\"")
+        Just result'' -> pure (Right result'')
 
 -- This path is changed by the Nix build to point to $out
 staticBasePath :: FilePath
 staticBasePath = "static/"
 
-getDbFile :: (MonadIO m) => m FilePath
-getDbFile = do
-  env <- liftIO getEnvironment
-  maybe getHomeDbFile pure (lookup "MYOCARDIO_DB_FILE" env)
+finishWithBadRequest :: TL.Text -> ActionM a
+finishWithBadRequest message = do
+  status status400
+  text message
+  finish
+
+withMuscle :: IdType -> [Muscle] -> (Muscle -> ActionM a) -> ActionM a
+withMuscle muscleId allMuscles f =
+  case find (\m -> m.id == muscleId) allMuscles of
+    Nothing -> finishWithBadRequest ("I couldn't parse the muscle you gave me: " <> packShowLazy muscleId)
+    Just muscle -> f muscle
 
 main :: IO ()
 main = do
-  homeDbFile' <- getDbFile
-  putStrLn $ "using DB file " <> homeDbFile'
   scotty 3000 do
     get "/" do
-      DBN.withDatabase \connection -> do
-        allMuscles' <- liftIO $ DBN.retrieveAllMuscles connection
-        exercises <- liftIO $ DBN.retrieveExercisesWithCurrentIntensity connection DBN.NotCommitted
-        currentSoreness <- liftIO $ DBN.retrieveSoreness connection
+      withDatabase \connection -> do
+        allMuscles' <- retrieveAllMuscles connection
+        exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
+        currentSoreness <- retrieveCurrentSoreness connection
         html $ renderText $ viewPageCurrentHtml allMuscles' exercises currentSoreness
 
     get "/exercises" do
-      DBN.withDatabase \connection -> do
-        exercises <- liftIO $ DBN.retrieveExercisesDescriptions connection
-        allMuscles' <- liftIO $ DBN.retrieveAllMuscles connection
+      withDatabase \connection -> do
+        exercises <- retrieveExercisesDescriptions connection
+        allMuscles' <- retrieveAllMuscles connection
         withForm <- queryParamMaybe "with-form"
         editExercise' <- queryParamMaybe "edit-exercise"
         case editExercise' of
@@ -140,7 +130,7 @@ main = do
                   ( if withForm == Just True
                       then
                         Just
-                          DBN.ExerciseDescription
+                          ExerciseDescription
                             { id = 0,
                               muscles = mempty,
                               description = "",
@@ -160,106 +150,93 @@ main = do
                     viewExerciseListOuter allMuscles' exercises (Just exerciseFound)
 
     get (capture "/training") do
-      homeDbFile <- getDbFile
-      db <- readDatabase homeDbFile
-      html $ renderText $ viewChooseOuter db
+      withDatabase \connection -> do
+        allMuscles' <- retrieveAllMuscles connection
+        exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
+        currentSoreness <- retrieveSorenessHistory connection
+        html $ renderText $ viewChooseOuter allMuscles' currentSoreness exercises
 
-    get "/stats" do
-      homeDbFile <- getDbFile
-      db <- readDatabase homeDbFile
-      html $ renderText $ viewStats db
+    get (capture "/training/:muscleid") do
+      withDatabase \connection -> do
+        currentTime <- liftIO getCurrentTime
+        muscleId <- pathParam "muscleid"
+        allMuscles' <- retrieveAllMuscles connection
+        exercises <- retrieveExercisesWithWorkouts connection Nothing
+        sorenessHistory <- retrieveSorenessHistory connection
 
-    get (capture "/training/:muscle") do
-      homeDbFile <- getDbFile
-      db <- readDatabase homeDbFile
-      currentTime <- liftIO getCurrentTime
-      muscle <- pathParam "muscle"
-      html $ renderText $ viewConcreteMuscleGroupExercisesOuter db currentTime muscle
+        case find (\m -> m.id == muscleId) allMuscles' of
+          Nothing -> do
+            status status400
+            text ("I couldn't parse the muscle you gave me: " <> packShowLazy muscleId)
+            finish
+          Just muscle ->
+            html $ renderText $ viewConcreteMuscleGroupExercisesOuter currentTime sorenessHistory exercises muscle
 
     get "/uploaded-files/:fileid" do
-      DBN.withDatabase \connection -> do
+      withDatabase \connection -> do
         fileId <- pathParam "fileid"
-        file <- liftIO $ DBN.retrieveFile connection fileId
-        raw file
+        file' <- retrieveFile connection fileId
+        raw file'
 
-    get "/remove-exercise/:exercise-name" do
-      exerciseName <- pathParam "exercise-name"
+    get "/remove-exercise/:exercise-id" do
+      exerciseId <- pathParam "exercise-id"
       -- Explicit annotation because it could be Text, LazyText, String, ...
       sure :: Maybe Text <- queryParamMaybe "sure"
-      if sure == Just "yes"
-        then do
-          homeDbFile <- getDbFile
-          removeExercise homeDbFile exerciseName
-          redirect "/"
-        else do
-          html $ renderText $ viewExerciseDeletion exerciseName
+      withDatabase \connection ->
+        if sure == Just "yes"
+          then do
+            removeExercise connection exerciseId
+            redirect "/"
+          else do
+            exercises <- retrieveExercisesDescriptions connection
+            case find (\e -> e.id == exerciseId) exercises of
+              Nothing -> redirect "/"
+              Just (ExerciseDescription {name}) -> html $ renderText $ viewExerciseDeletion exerciseId name
 
     post "/edit-exercise" do
       -- Very very weird behavior - why is there always at least one file, with not even an empty
       -- file name but ""?
-      uploadedFiles <- filter (\(_, fileData) -> fileName fileData /= "\"\"") <$> files
-      writtenFiles <- traverse uploadSingleFile uploadedFiles
-      musclesRaw <- paramValues exerciseFormMusclesParam
-      case traverse (parseParam . TL.fromStrict) musclesRaw of
+      uploadedFiles :: [(Text, FileInfo BSL.ByteString)] <- filter (\(_, fileData) -> fileName fileData /= "\"\"") <$> files
+      musclesRaw :: Either Text (NE.NonEmpty IdType) <- paramValuesNE exerciseFormMusclesParam
+      case musclesRaw of
         Left parseError -> do
           status status400
-          text ("I couldn't parse all the muscles you gave me: " <> packShowLazy parseError)
+          text ("I couldn't parse all the muscle IDs you gave me, or the list was empty: " <> packShowLazy parseError)
           finish
-        Right muscles' -> do
-          case NE.nonEmpty muscles' of
-            Nothing -> do
-              status status400
-              text "I got an empty list of muscles!"
-              finish
-            Just muscles'' -> do
-              category' <- formParam exerciseFormCategoryParam
+        Right muscleIds -> withDatabase \conn -> do
+          allMuscles <- retrieveAllMuscles conn
+          case traverse (\muscleId -> find (\m -> m.id == muscleId) allMuscles) muscleIds of
+            Nothing -> finishWithBadRequest ("one of the muscles was not found, id list is " <> packShowLazy muscleIds)
+            Just muscles -> do
               description' <- formParam exerciseFormDescriptionParam
               name' <- formParam exerciseFormNameParam
-              toDelete <- paramValues exerciseFormFilesToDeleteParam
-              uploadedFileDir <- getUploadedFileDir
-              forM_ toDelete (liftIO . removeFile . unpack . (\fn -> pack uploadedFileDir <> "/" <> fn))
-              homeDbFile <- getDbFile
-              originalExerciseName <- formParam "original-exercise-name"
-              if Text.null originalExerciseName
-                then
-                  addExercise
-                    homeDbFile
-                    ( Exercise
-                        { muscles = muscles'',
-                          category = category',
-                          description = description',
-                          name = name',
-                          fileReferences = writtenFiles
-                        }
-                    )
-                else
-                  modifyExercise
-                    homeDbFile
-                    (ExerciseName originalExerciseName)
-                    ( \oldExercise ->
-                        let newFiles :: [FileReference]
-                            newFiles =
-                              filter
-                                (\(FileReference fileRef) -> fileRef `notElem` toDelete)
-                                oldExercise.fileReferences
-                                <> writtenFiles
-                         in oldExercise
-                              { muscles = muscles'',
-                                category = category',
-                                description = description',
-                                name = name',
-                                fileReferences = newFiles
-                              }
-                    )
-              redirect "/exercises"
+              toDeleteEither <- paramValues exerciseFormFilesToDeleteParam
+              case toDeleteEither of
+                Left _ -> finishWithBadRequest "one of the IDs to delete was not found"
+                Right toDelete -> do
+                  exerciseId <- formParamMaybe "exercise-id"
+                  let uploadedFileContents :: [BSL.ByteString]
+                      uploadedFileContents = (\(_, fileInfo) -> fileContent fileInfo) <$> uploadedFiles
+                  case exerciseId of
+                    Nothing ->
+                      void (insertExercise conn (foldMap (Set.singleton . (.id)) muscles) name' description' uploadedFileContents)
+                    Just exerciseId' ->
+                      updateExercise
+                        conn
+                        exerciseId'
+                        (foldMap Set.singleton muscles)
+                        name'
+                        description'
+                        uploadedFileContents
+                        toDelete
+                  redirect "/exercises"
 
     post "/toggle-exercise-in-workout" do
-      exerciseName <- formParam "exercise-name"
-      intensity' <- formParamMaybe "intensity"
+      exerciseId <- formParam "exercise-id"
+      intensity' <- formParam "intensity"
 
-      homeDbFile <- getDbFile
       currentTime <- liftIO getCurrentTime
-      toggleExercise homeDbFile currentTime exerciseName intensity'
+      withDatabase \conn -> toggleExercise conn exerciseId currentTime intensity'
       returnToCurrent :: Maybe Bool <- formParamMaybe "return-to-current"
       redirect case returnToCurrent of
         Nothing ->
@@ -267,32 +244,33 @@ main = do
         Just _ -> "/"
 
     post "/change-intensity" do
-      exerciseName <- formParam "exercise-name"
+      exerciseId <- formParam "exercise-id"
       intensity' <- formParam "intensity"
-      homeDbFile <- getDbFile
-      changeIntensity homeDbFile exerciseName intensity'
+      withDatabase \conn -> changeIntensity conn exerciseId intensity'
       redirect "/"
 
     post "/update-soreness" do
-      muscle' <- formParam "muscle"
+      muscleId <- formParam "muscle"
       howSore' <- formParam "how-sore"
 
-      homeDbFile <- getDbFile
-      currentTime <- liftIO getCurrentTime
-      addSoreness homeDbFile currentTime muscle' howSore'
-
-      redirect "/"
+      withDatabase \conn -> do
+        allMuscles <- retrieveAllMuscles conn
+        withMuscle muscleId allMuscles \muscle -> do
+          currentTime <- liftIO getCurrentTime
+          updateSoreness conn muscle.id howSore' currentTime
+          redirect "/"
 
     post "/reset-soreness" do
-      muscle' <- formParam "muscle"
-      homeDbFile <- getDbFile
+      muscleId <- formParam "muscle"
       currentTime <- liftIO getCurrentTime
-      addSoreness homeDbFile currentTime muscle' NotSore
+
+      withDatabase \conn -> do
+        updateSoreness conn muscleId notSore currentTime
+
       redirect "/"
 
     post "/commit-workout" do
-      homeDbFile <- getDbFile
-      commitWorkout homeDbFile
+      withDatabase \conn -> commitWorkout conn
       redirect "/"
 
     middleware (staticPolicy (noDots <> isNotAbsolute <> addBase staticBasePath))
