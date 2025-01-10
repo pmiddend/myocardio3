@@ -8,7 +8,7 @@
 module Main (main) where
 
 import Control.Applicative (Applicative (pure))
-import Control.Monad (void)
+import Control.Monad (forM_, void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Bifunctor (first)
 import Data.Bool (Bool (True))
@@ -19,8 +19,9 @@ import Data.Function (($), (.))
 import Data.Functor ((<$>))
 import Data.List (filter, sortOn)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (Maybe (Just, Nothing), mapMaybe)
+import Data.Maybe (Maybe (Just, Nothing), mapMaybe, maybe)
 import Data.Monoid (mempty)
+import Data.Ord (comparing)
 import Data.Semigroup (Semigroup ((<>)))
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -31,6 +32,8 @@ import Lucid (renderText)
 import Myocardio.DatabaseNew
   ( ExerciseCommitted (NotCommitted),
     ExerciseDescription (ExerciseDescription, description, fileIds, id, muscles, name),
+    ExerciseWithWorkouts (id, workouts),
+    ExerciseWorkout (intensity, time),
     IdType,
     Muscle (id),
     changeIntensity,
@@ -43,6 +46,7 @@ import Myocardio.DatabaseNew
     retrieveExercisesDescriptions,
     retrieveExercisesWithWorkouts,
     retrieveFile,
+    retrieveLastWorkout,
     retrieveSorenessHistory,
     toggleExercise,
     updateExercise,
@@ -52,6 +56,7 @@ import Myocardio.DatabaseNew
 import Network.HTTP.Types.Status (status400)
 import Network.Wai.Middleware.Static (addBase, isNotAbsolute, noDots, staticPolicy)
 import Network.Wai.Parse (FileInfo (fileContent, fileName))
+import Safe.Foldable (maximumByMay)
 import System.IO (FilePath, IO)
 import Util (packShowLazy)
 import Views (exerciseFormDescriptionParam, exerciseFormFilesToDeleteParam, exerciseFormMusclesParam, exerciseFormNameParam, viewChooseOuter, viewConcreteMuscleGroupExercisesOuter, viewExerciseDeletion, viewExerciseListOuter, viewPageCurrentHtml)
@@ -112,7 +117,24 @@ main = do
         allMuscles' <- retrieveAllMuscles connection
         exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
         currentSoreness <- retrieveCurrentSoreness connection
-        html $ renderText $ viewPageCurrentHtml allMuscles' exercises currentSoreness
+        lastWorkout <- retrieveLastWorkout connection
+        currentTime <- liftIO getCurrentTime
+        html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness
+
+    get "/repeat-last" do
+      withDatabase \connection -> do
+        lastWorkout <- retrieveLastWorkout connection
+        currentTime <- liftIO getCurrentTime
+        forM_ lastWorkout \exerciseWithWorkout -> do
+          toggleExercise
+            connection
+            exerciseWithWorkout.id
+            currentTime
+            (maybe "" (.intensity) (maximumByMay (comparing (.time)) (Set.elems exerciseWithWorkout.workouts)))
+        allMuscles' <- retrieveAllMuscles connection
+        exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
+        currentSoreness <- retrieveCurrentSoreness connection
+        html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness
 
     get "/exercises" do
       withDatabase \connection -> do
@@ -270,7 +292,7 @@ main = do
       redirect "/"
 
     post "/commit-workout" do
-      withDatabase \conn -> commitWorkout conn
+      withDatabase commitWorkout
       redirect "/"
 
     middleware (staticPolicy (noDots <> isNotAbsolute <> addBase staticBasePath))
