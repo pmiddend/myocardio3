@@ -16,6 +16,7 @@ module Myocardio.DatabaseNew
     MigrationFlags (..),
     IdType,
     withDatabase,
+    retrieveLastWorkout,
     notSore,
     littleSore,
     verySore,
@@ -299,26 +300,17 @@ retrieveSorenessHistory connection = do
 
 data ExerciseCommitted = Committed | NotCommitted
 
--- TODO: Add muscle group filter here
-retrieveExercisesWithWorkouts :: forall m. (MonadIO m) => Connection -> Maybe ExerciseCommitted -> m [ExerciseWithWorkouts]
-retrieveExercisesWithWorkouts conn committedFilterMaybe = liftIO $ do
-  let queryBase =
-        "SELECT E.id, E.description, E.name, M.id muscle_id, M.name muscle_name, F.id file_id, WI.intensity, WI.time, WI.committed \
-        \  FROM Exercise as E \
-        \  LEFT JOIN ExerciseHasMuscle ON E.id = ExerciseHasMuscle.exercise_id \
-        \  LEFT JOIN Muscle M ON M.id = ExerciseHasMuscle.muscle_id \
-        \  LEFT JOIN ExerciseHasFile F ON E.id = F.exercise_id \
-        \  LEFT JOIN ExerciseWithIntensity WI ON E.id = WI.exercise_id"
-      finalStatement :: IO [(IdType, Text, Text, Maybe IdType, Maybe Text, Maybe IdType, Maybe Text, Maybe UTCTime, Maybe Int)]
-      finalStatement = case committedFilterMaybe of
-        Nothing -> query_ conn queryBase
-        Just committedFilter ->
-          query
-            conn
-            (queryBase <> " WHERE WI.committed = ?")
-            (Only @Int (case committedFilter of Committed -> 1; NotCommitted -> 0))
+processExercisesWithWorkoutsQueryBase :: Query
+processExercisesWithWorkoutsQueryBase =
+  "SELECT E.id, E.description, E.name, M.id muscle_id, M.name muscle_name, F.id file_id, WI.intensity, WI.time, WI.committed \
+  \  FROM Exercise as E \
+  \  LEFT JOIN ExerciseHasMuscle ON E.id = ExerciseHasMuscle.exercise_id \
+  \  LEFT JOIN Muscle M ON M.id = ExerciseHasMuscle.muscle_id \
+  \  LEFT JOIN ExerciseHasFile F ON E.id = F.exercise_id \
+  \  LEFT JOIN ExerciseWithIntensity WI ON E.id = WI.exercise_id"
 
-  results <- finalStatement
+processExercisesWithWorkouts :: [(IdType, Text, Text, Maybe IdType, Maybe Text, Maybe IdType, Maybe Text, Maybe UTCTime, Maybe Int)] -> IO [ExerciseWithWorkouts]
+processExercisesWithWorkouts results = do
   exerciseDataRef <- newIORef mempty
   exerciseMusclesByIdRef <- newIORef mempty
   exerciseFilesByIdRef <- newIORef mempty
@@ -362,6 +354,19 @@ retrieveExercisesWithWorkouts conn committedFilterMaybe = liftIO $ do
       )
         <$> Set.toList exerciseData
     )
+
+retrieveExercisesWithWorkouts :: forall m. (MonadIO m) => Connection -> Maybe ExerciseCommitted -> m [ExerciseWithWorkouts]
+retrieveExercisesWithWorkouts conn committedFilterMaybe = liftIO $ do
+  let finalStatement :: IO [(IdType, Text, Text, Maybe IdType, Maybe Text, Maybe IdType, Maybe Text, Maybe UTCTime, Maybe Int)]
+      finalStatement = case committedFilterMaybe of
+        Nothing -> query_ conn processExercisesWithWorkoutsQueryBase
+        Just committedFilter ->
+          query
+            conn
+            (processExercisesWithWorkoutsQueryBase <> " WHERE WI.committed = ?")
+            (Only @Int (case committedFilter of Committed -> 1; NotCommitted -> 0))
+  results <- finalStatement
+  processExercisesWithWorkouts results
 
 retrieveAllMuscles :: forall m. (MonadIO m) => Connection -> m [Muscle]
 retrieveAllMuscles connection = liftIO do
@@ -485,3 +490,8 @@ updateSoreness conn muscleId soreness currentTime = liftIO do
 commitWorkout :: forall m. (MonadIO m) => Connection -> m ()
 commitWorkout conn = liftIO do
   execute conn "UPDATE ExerciseWithIntensity SET committed = ?" (Only (1 :: Int))
+
+retrieveLastWorkout :: forall m. (MonadIO m) => Connection -> m [ExerciseWithWorkouts]
+retrieveLastWorkout conn = liftIO do
+  results <- query_ conn (processExercisesWithWorkoutsQueryBase <> " WHERE DATE(time) IN (SELECT DATE(time) FROM ExerciseWithIntensity WHERE committed = 1 ORDER BY time DESC LIMIT 1)")
+  processExercisesWithWorkouts results

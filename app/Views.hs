@@ -164,11 +164,8 @@ idSoreness = HtmlId "soreness"
 idExerciseHistory :: HtmlId
 idExerciseHistory = HtmlId "exercise-history"
 
-sorenessInputAndOutput :: [Muscle] -> [DBN.Soreness] -> L.Html ()
-sorenessInputAndOutput allMuscles soreness = do
-  L.h1_ [makeId idSoreness] do
-    iconHtml "graph-down-arrow"
-    L.span_ "Soreness"
+viewSorenessForm :: [Muscle] -> [DBN.Soreness] -> L.Html ()
+viewSorenessForm allMuscles soreness = do
   L.form_ [L.action_ "/update-soreness", L.method_ "post"] do
     L.div_ [L.class_ "mb-2"] do
       L.div_ [L.class_ "form-floating"] do
@@ -287,9 +284,6 @@ viewCurrentWorkout allMuscles' exercises =
     case exercises of
       [] -> mempty
       currentExercises -> do
-        L.h1_ do
-          iconHtml "joystick"
-          L.span_ "Current"
         let musclesInvolved :: Set.Set Muscle
             musclesInvolved = foldMap (\e -> e.muscles) currentExercises
             musclesMissing :: Set.Set Muscle
@@ -572,7 +566,7 @@ newExerciseButtonHtml =
         L.span_ "New exercise"
 
 buildImageSrc :: (Show a) => a -> Text
-buildImageSrc fileId = "/" <> pack "uploaded-files2" <> "/" <> packShow fileId
+buildImageSrc fileId = "/" <> pack "uploaded-files" <> "/" <> packShow fileId
 
 viewExerciseImageHtml :: IdType -> L.Html ()
 viewExerciseImageHtml fileId =
@@ -620,8 +614,8 @@ viewExerciseList allMuscles' exercises existingExercise = do
       forM_ exercise'.muscles \muscle' -> L.span_ [L.class_ "badge text-bg-primary me-1"] (L.toHtml muscle'.name)
     L.div_ [L.class_ "alert alert-light"] (viewExerciseDescriptionHtml exercise')
 
-viewPageCurrentHtml :: [DBN.Muscle] -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> L.Html ()
-viewPageCurrentHtml allMuscles' exercises sorenessHistory = viewHtmlSkeleton PageCurrent $ do
+viewPageCurrentHtml :: UTCTime -> [DBN.Muscle] -> [DBN.ExerciseWithWorkouts] -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> L.Html ()
+viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout sorenessHistory = viewHtmlSkeleton PageCurrent $ do
   L.div_ [L.class_ "text-bg-light p-2"] do
     L.ul_ $ do
       L.li_ $ L.a_ [makeHref idCurrentWorkout] do
@@ -632,10 +626,29 @@ viewPageCurrentHtml allMuscles' exercises sorenessHistory = viewHtmlSkeleton Pag
         L.span_ "Soreness"
       L.li_ $ L.a_ [makeHref idExerciseHistory] do
         iconHtml "clipboard-data-fill"
-        L.span_ "Exercise History"
+        L.span_ "Last Workout"
   viewCurrentWorkout allMuscles' exercises
   L.hr_ [L.class_ "mb-3"]
-  sorenessInputAndOutput allMuscles' sorenessHistory
+  viewLastWorkout currentTime lastWorkout
+  L.hr_ [L.class_ "mb-3"]
+  viewSorenessForm allMuscles' sorenessHistory
+
+viewLastWorkout :: UTCTime -> [DBN.ExerciseWithWorkouts] -> L.Html ()
+viewLastWorkout _ [] = mempty
+viewLastWorkout currentTime exercises@(e : _) = case Set.elems e.workouts of
+  [] -> mempty
+  (workout : _) -> do
+    let musclesInvolved :: [DBN.Muscle]
+        musclesInvolved = Set.toList (foldMap (.muscles) exercises)
+
+    L.h4_ do
+      "Last workout: "
+      L.em_ (L.toHtml (dayDiffText currentTime workout.time))
+    L.div_ [L.class_ "gap-1 mb-3"] do
+      L.span_ [L.class_ "text-muted me-1"] "Trained: "
+      forM_ musclesInvolved \muscle' -> L.span_ [L.class_ "badge text-bg-success me-1"] (L.toHtml muscle'.name)
+    L.form_ [L.action_ "/repeat-last"] do
+      L.button_ [L.class_ "btn btn-primary"] "Repeat this workout"
 
 viewChooseOuter :: [DBN.Muscle] -> [DBN.Soreness] -> [DBN.ExerciseWithWorkouts] -> L.Html ()
 viewChooseOuter allMuscles' sorenessHistory currentTraining =
