@@ -476,7 +476,7 @@ toggleExercise conn exerciseId currentTime intensity = liftIO do
 
 changeIntensity :: forall m. (MonadIO m) => Connection -> IdType -> Text -> m ()
 changeIntensity conn exerciseId intensity = liftIO do
-  execute conn "UPDATE ExerciseWithIntensity SET intensity = ? WHERE exerciseId = ? AND committed = ?" (intensity, exerciseId, 0 :: Int)
+  execute conn "UPDATE ExerciseWithIntensity SET intensity = ? WHERE exercise_id = ? AND committed = ?" (intensity, exerciseId, 0 :: Int)
 
 updateSoreness :: forall m. (MonadIO m) => Connection -> IdType -> Int -> UTCTime -> m ()
 updateSoreness conn muscleId soreness currentTime = liftIO do

@@ -224,7 +224,7 @@ viewExerciseImageCarousel exercise = do
             L.div_
               [ L.class_ "carousel-item" <> if i == (0 :: Int) then L.class_ "active" else mempty
               ]
-              $ L.img_ [L.src_ ("/uploaded-files/" <> packShow fileId), L.class_ "d-block w-100"]
+              $ L.img_ [L.src_ (buildImageSrc fileId), L.class_ "d-block w-100"]
         )
       unless (Set.size exercise.fileIds <= 1) do
         L.button_
@@ -571,10 +571,12 @@ newExerciseButtonHtml =
         iconHtml "plus-lg"
         L.span_ "New exercise"
 
+buildImageSrc fileId = "/" <> pack "uploaded-files2" <> "/" <> packShow fileId
+
 viewExerciseImageHtml :: IdType -> L.Html ()
 viewExerciseImageHtml fileId =
   L.figure_ [L.class_ "figure"] $
-    L.img_ [L.src_ ("/" <> pack "uploaded-files" <> "/" <> packShow fileId), L.class_ "figure-img img-fluid rounded"]
+    L.img_ [L.src_ (buildImageSrc fileId), L.class_ "figure-img img-fluid rounded"]
 
 viewExerciseDescriptionHtml :: DBN.ExerciseDescription -> L.Html ()
 viewExerciseDescriptionHtml e = do
