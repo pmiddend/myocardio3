@@ -20,7 +20,7 @@ module Views
 where
 
 import CMarkGFM (commonmarkToHtml)
-import Control.Monad (unless, when, (>>=))
+import Control.Monad (unless, void, when, (>>=))
 import Data.Bool (Bool (True), not, otherwise)
 import Data.Eq (Eq, (==))
 import Data.Foldable (Foldable (elem), any, find, foldMap, forM_, for_, mapM_)
@@ -42,7 +42,7 @@ import Data.Traversable (forM)
 import Data.Tuple (fst)
 import Lucid qualified as L
 import Lucid.Base (makeAttributes)
-import Myocardio.DatabaseNew (ExerciseWorkout (ExerciseWorkout), IdType, Muscle, MuscleWithWorkout (MuscleWithWorkout), Soreness, littleSore, verySore)
+import Myocardio.DatabaseNew (ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, littleSore, verySore)
 import Myocardio.DatabaseNew qualified as DBN
 import Safe (lastMay, maximumByMay)
 import Util (packShow)
@@ -571,6 +571,7 @@ newExerciseButtonHtml =
         iconHtml "plus-lg"
         L.span_ "New exercise"
 
+buildImageSrc :: (Show a) => a -> Text
 buildImageSrc fileId = "/" <> pack "uploaded-files2" <> "/" <> packShow fileId
 
 viewExerciseImageHtml :: IdType -> L.Html ()
@@ -592,12 +593,12 @@ viewExerciseList allMuscles' exercises existingExercise = do
   L.div_ [makeId idExerciseForm, L.class_ "mb-3"] do
     maybe newExerciseButtonHtml (viewExerciseFormHtml allMuscles') existingExercise
   L.hr_ []
-  L.div_ [L.class_ "card text-bg-primary mb-3"] do
+  void $ L.div_ [L.class_ "card text-bg-primary mb-3"] do
     L.div_ [L.class_ "card-header"] "TOC"
     L.div_ [L.class_ "card-body"] do
       L.ul_ $
         forM exercises \exercise -> L.li_ do
-          L.a_ [L.class_ "text-bg-primary", L.href_ ("#ex" <> packShow (exercise.id))] (L.toHtml exercise.name)
+          L.a_ [L.class_ "text-bg-primary", L.href_ ("#ex" <> packShow exercise.id)] (L.toHtml exercise.name)
   forM_ exercises \exercise' -> do
     L.h3_ [L.id_ ("description-" <> htmlIdFromText exercise'.name), L.class_ "d-flex"] do
       L.a_ [L.name_ ("ex" <> packShow exercise'.id)] mempty
@@ -618,24 +619,6 @@ viewExerciseList allMuscles' exercises existingExercise = do
     L.div_ [L.class_ "gap-1 mb-3"] do
       forM_ exercise'.muscles \muscle' -> L.span_ [L.class_ "badge text-bg-primary me-1"] (L.toHtml muscle'.name)
     L.div_ [L.class_ "alert alert-light"] (viewExerciseDescriptionHtml exercise')
-
-viewExerciseHistory :: UTCTime -> [MuscleWithWorkout] -> L.Html ()
-viewExerciseHistory currentTime musclesWithLastWorkout = do
-  L.h1_ do
-    iconHtml "clipboard-data-fill"
-    L.span_ "Training state"
-  L.div_ [L.class_ "row mb-3"] do
-    L.div_ [L.class_ "col-6 text-center"] do
-      L.h5_ "Anterior View"
-      L.img_ [L.src_ "/muscles/front.svg", L.class_ "img-fluid"]
-    L.div_ [L.class_ "col-6 text-center"] do
-      L.h5_ "Posterior View"
-      L.img_ [L.src_ "/muscles/back.svg", L.class_ "img-fluid"]
-  L.ol_ [L.class_ "list-group list-group-numbered"] $
-    forM_ musclesWithLastWorkout \(MuscleWithWorkout {muscleName, workoutTime}) -> do
-      L.li_ [L.class_ "list-group-item d-flex justify-content-between align-items-start"] do
-        L.div_ [L.class_ "fw-bold"] (L.toHtml muscleName)
-        L.toHtml $ dayDiffText currentTime workoutTime
 
 viewPageCurrentHtml :: [DBN.Muscle] -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> L.Html ()
 viewPageCurrentHtml allMuscles' exercises sorenessHistory = viewHtmlSkeleton PageCurrent $ do
