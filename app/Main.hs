@@ -8,18 +8,19 @@
 module Main (main) where
 
 import Control.Applicative (Applicative (pure))
-import Control.Monad (forM_, mapM_, void)
+import Control.Monad (foldM, forM_, mapM_, void, (>>=))
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Data.Bifunctor (first)
+import Data.Bifunctor (Bifunctor (second), first)
 import Data.Bool (Bool (True))
 import Data.ByteString.Lazy qualified as BSL
 import Data.Eq (Eq ((/=)), (==))
-import Data.Foldable (find, foldMap)
+import Data.Foldable (find, foldMap, foldr, sum)
 import Data.Function (($), (.))
-import Data.Functor ((<$>))
+import Data.Functor (fmap, (<$>))
 import Data.Int (Int, Int64)
-import Data.List (filter, sortOn)
+import Data.List (drop, filter, scanl', sortOn, splitAt, zip, zipWith)
 import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as Map
 import Data.Maybe (Maybe (Just, Nothing), mapMaybe, maybe)
 import Data.Monoid (mempty)
 import Data.Ord (comparing)
@@ -27,9 +28,15 @@ import Data.Semigroup (Semigroup ((<>)))
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Encoding qualified as TLE
 import Data.Text.Read (decimal)
+import Data.Time (DayOfWeek (Monday), utctDay)
+import Data.Time.Calendar.WeekDate (FirstWeekType (FirstMostWeek), toWeekCalendar)
 import Data.Time.Clock (getCurrentTime)
 import Data.Traversable (sequence, traverse)
+import Data.Tuple (fst, snd)
+import Graphics.Rendering.Chart.Backend.Cairo (FileFormat (SVG), toFile, _fo_format, _fo_size)
+import Graphics.Rendering.Chart.Easy (def, line, plot)
 import Lucid (renderText)
 import Myocardio.DatabaseNew
   ( ExerciseCommitted (NotCommitted),
@@ -38,6 +45,7 @@ import Myocardio.DatabaseNew
     ExerciseWorkout (intensity, time),
     IdType,
     Muscle (id),
+    MuscleWithWorkoutTime (MuscleWithWorkoutTime, muscleId),
     SorenessScalar (LittleSore, NotSore, VerySore),
     changeIntensity,
     commitWorkout,
@@ -50,6 +58,7 @@ import Myocardio.DatabaseNew
     retrieveFile,
     retrieveLastWorkout,
     retrieveMusclesTrainedHistory,
+    retrieveMusclesWithDates,
     retrieveSorenessHistory,
     toggleExercise,
     updateExercise,
@@ -61,10 +70,12 @@ import Network.Wai.Middleware.Static (addBase, isNotAbsolute, noDots, staticPoli
 import Network.Wai.Parse (FileInfo (fileContent, fileName))
 import Safe.Foldable (maximumByMay)
 import System.IO (FilePath, IO)
+import System.IO.Temp (withSystemTempDirectory)
 import Util (packShowLazy)
-import Views (exerciseFormDescriptionParam, exerciseFormFilesToDeleteParam, exerciseFormMusclesParam, exerciseFormNameParam, muscleIdForMuscleSorenessFromHtml, viewChooseOuter, viewConcreteMuscleGroupExercisesOuter, viewExerciseDeletion, viewExerciseListOuter, viewPageCurrentHtml)
-import Web.Scotty (ActionM, Parsable (parseParam, parseParamList), capture, files, finish, formParam, formParamMaybe, formParams, get, html, middleware, pathParam, post, queryParamMaybe, raw, redirect, scotty, status, text)
-import Prelude (Either (Left, Right))
+import Views (exerciseFormDescriptionParam, exerciseFormFilesToDeleteParam, exerciseFormMusclesParam, exerciseFormNameParam, muscleIdForMuscleSorenessFromHtml, viewChooseOuter, viewConcreteMuscleGroupExercisesOuter, viewExerciseDeletion, viewExerciseListOuter, viewPageCurrentHtml, viewStats)
+import Web.Scotty (ActionM, Parsable (parseParam, parseParamList), capture, files, finish, formParam, formParamMaybe, formParams, get, html, pathParam, post, queryParamMaybe, raw, redirect, scotty, status, text)
+import Web.Scotty.Trans (middleware)
+import Prelude (Either (Left, Right), Float, Fractional, Integer, fromIntegral, (*), (+), (-), (/))
 
 instance (Parsable a) => Parsable (NE.NonEmpty a) where
   parseParam v =
@@ -105,6 +116,51 @@ finishWithBadRequest message = do
   status status400
   text message
   finish
+
+mavg :: (Fractional b) => Int -> [b] -> [b]
+mavg k lst = fmap (/ fromIntegral k) $ scanl' (+) (sum h) $ zipWith (-) t lst
+  where
+    (h, t) = splitAt k lst
+
+viewSvgForMuscle :: (MonadIO m) => [MuscleWithWorkoutTime] -> IdType -> m TL.Text
+viewSvgForMuscle musclesWithDate muscleId =
+  case filter (\mwd -> mwd.muscleId == muscleId) musclesWithDate of
+    [] -> pure mempty
+    myMuscle -> do
+      currentTime <- liftIO getCurrentTime
+      let (currentYear, currentWeek, _) = toWeekCalendar FirstMostWeek Monday (utctDay currentTime)
+          alterer :: Maybe Int -> Maybe Int
+          alterer Nothing = Just 1
+          alterer (Just count) = Just (count + 1)
+          weekToCountMap :: Map.Map Integer Int
+          weekToCountMap =
+            foldr
+              ( \(MuscleWithWorkoutTime _muscleId _muscleName year week) ->
+                  Map.alter alterer ((fromIntegral year - 2024) * 52 + fromIntegral week)
+              )
+              ( Map.fromList
+                  ( [2024 .. currentYear]
+                      >>= ( \year ->
+                              (\week -> ((year - 2024) * 52 + week, 0))
+                                <$> [1 .. (if year == currentYear then fromIntegral currentWeek else 52)]
+                          )
+                  )
+              )
+              myMuscle
+          weekToCountOriginal :: [(Integer, Float)]
+          weekToCountOriginal = second fromIntegral <$> Map.toList weekToCountMap
+          averaged = mavg 3 (snd <$> weekToCountOriginal)
+          weekToCount = zip (fst <$> weekToCountOriginal) averaged
+      fileContents <- liftIO $ withSystemTempDirectory "chart" \tempDirPath -> do
+        let filePath = tempDirPath <> "/chart.png"
+        toFile (def {_fo_format = SVG, _fo_size = (400, 300)}) filePath do
+          -- layout_title .= unpack mwd.muscleName
+          -- layout_left_axis . laxis_override .= axisGridHide
+          plot (line "Frequency" [weekToCount])
+        BSL.readFile filePath
+      let contentsAsText = TLE.decodeUtf8 fileContents
+          withoutFirstLine = drop 1 (TL.lines contentsAsText)
+      pure (TL.unlines withoutFirstLine)
 
 main :: IO ()
 main = do
@@ -299,5 +355,19 @@ main = do
     post "/commit-workout" do
       withDatabase commitWorkout
       redirect "/"
+
+    get "/stats" do
+      musclesWithDate <- withDatabase retrieveMusclesWithDates
+      allMuscles <- withDatabase retrieveAllMuscles
+      muscleToSvg <-
+        foldM
+          ( \prevMap newMuscle -> do
+              svg <- viewSvgForMuscle musclesWithDate newMuscle.id
+              pure (Map.insert newMuscle svg prevMap)
+          )
+          mempty
+          allMuscles
+      html $ renderText do
+        viewStats muscleToSvg
 
     middleware (staticPolicy (noDots <> isNotAbsolute <> addBase staticBasePath))
