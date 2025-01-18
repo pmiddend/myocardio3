@@ -4,32 +4,25 @@ module Main (main) where
 
 import Control.Applicative (pure)
 import Control.Exception (bracket)
-import Control.Monad ((>>=))
 import Data.Eq ((==))
 import Data.Fixed (Pico)
 import Data.Foldable (find)
-import Data.Function (const, ($))
+import Data.Function (($))
 import Data.List (length)
-import Data.List.NonEmpty qualified as NE
 import Data.Maybe (Maybe (Just, Nothing))
 import Data.Monoid (mempty)
 import Data.Set qualified as Set
 import Data.Time.Clock (NominalDiffTime, addUTCTime, getCurrentTime, secondsToNominalDiffTime)
-import Myocardio.DatabaseNew (Connection, MigrationFlags (NoJson), closeDatabase, id, insertExercise, insertMuscle, littleSore, migrateDatabase, muscleId, notSore, openDatabase, retrieveAllMuscles, retrieveCurrentSoreness, retrieveExercisesDescriptions, retrieveExercisesWithWorkouts, retrieveMusclesWithLastWorkoutTime, retrieveSorenessHistory, toggleExercise, updateSoreness, workouts)
-import Safe (headMay)
+import Myocardio.DatabaseNew (Connection, MigrationFlags (NoJson), SorenessScalar (LittleSore, NotSore), closeDatabase, id, insertExercise, insertMuscle, migrateDatabase, muscleId, openDatabase, retrieveAllMuscles, retrieveCurrentSoreness, retrieveExercisesDescriptions, retrieveExercisesWithWorkouts, retrieveMusclesWithLastWorkoutTime, retrieveSorenessHistory, toggleExercise, updateSoreness, workouts)
 import System.Directory (removeFile)
-import System.FilePath (FilePath)
 import System.IO (IO)
 import System.IO.Temp (emptySystemTempFile)
 import Test.Tasty (TestTree, defaultMain, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, testCaseSteps, (@?=))
-import Prelude (Num ((*), (-)))
+import Test.Tasty.HUnit (assertFailure, testCaseSteps, (@?=))
+import Prelude ()
 
 tests :: TestTree
 tests = testGroup "Tests" [unitTests]
-
-days :: Pico -> NominalDiffTime
-days i = secondsToNominalDiffTime (i * 86400)
 
 withTemporaryDb :: (Connection -> IO c) -> IO c
 withTemporaryDb f =
@@ -45,7 +38,7 @@ unitTests :: TestTree
 unitTests =
   testGroup
     "Unit tests"
-    [ testCaseSteps "create DB, should be empty" \step -> withTemporaryDb \conn -> do
+    [ testCaseSteps "create DB, should be empty" \_step -> withTemporaryDb \conn -> do
         exercisesWithWorkouts <- retrieveExercisesWithWorkouts conn Nothing
         length exercisesWithWorkouts @?= 0,
       testCaseSteps "create muscles, add soreness and retrieve" $ \step -> withTemporaryDb \conn -> do
@@ -54,14 +47,14 @@ unitTests =
         _ <- insertMuscle conn "Core"
         now <- getCurrentTime
         step "Updating soreness"
-        updateSoreness conn pecs littleSore (addUTCTime (-100) now)
+        updateSoreness conn pecs LittleSore (addUTCTime (-100) now)
         sorenessValues <- retrieveCurrentSoreness conn
         case sorenessValues of
           [sorenessValue] -> do
             sorenessValue.muscleId @?= pecs
           _ -> assertFailure "didn't get exactly one soreness value"
         step "Setting muscle to not sore anymore"
-        updateSoreness conn pecs notSore now
+        updateSoreness conn pecs NotSore now
         sorenessValues' <- retrieveCurrentSoreness conn
         length sorenessValues' @?= 0
         step "Retrieve soreness history"
@@ -82,7 +75,7 @@ unitTests =
 
         step "Creating exercises"
         ex1 <- insertExercise conn (Set.fromList [pecs, core]) "ex1" "some description" mempty
-        ex2 <- insertExercise conn (Set.fromList [pecs, core]) "ex2" "some description" mempty
+        _ex2 <- insertExercise conn (Set.fromList [pecs, core]) "ex2" "some description" mempty
 
         exercises <- retrieveExercisesDescriptions conn
         length exercises @?= 2

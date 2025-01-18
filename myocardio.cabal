@@ -84,6 +84,4 @@ test-suite myocardio-tests
     temporary,
     containers,
     directory,
-    safe,
-    filepath,
     time

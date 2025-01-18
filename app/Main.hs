@@ -8,7 +8,7 @@
 module Main (main) where
 
 import Control.Applicative (Applicative (pure))
-import Control.Monad (forM_, void)
+import Control.Monad (forM_, mapM_, void)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Bifunctor (first)
 import Data.Bool (Bool (True))
@@ -17,6 +17,7 @@ import Data.Eq (Eq ((/=)), (==))
 import Data.Foldable (find, foldMap)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
+import Data.Int (Int, Int64)
 import Data.List (filter, sortOn)
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (Maybe (Just, Nothing), mapMaybe, maybe)
@@ -26,6 +27,7 @@ import Data.Semigroup (Semigroup ((<>)))
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
+import Data.Text.Read (decimal)
 import Data.Time.Clock (getCurrentTime)
 import Data.Traversable (sequence, traverse)
 import Lucid (renderText)
@@ -36,10 +38,10 @@ import Myocardio.DatabaseNew
     ExerciseWorkout (intensity, time),
     IdType,
     Muscle (id),
+    SorenessScalar (LittleSore, NotSore, VerySore),
     changeIntensity,
     commitWorkout,
     insertExercise,
-    notSore,
     removeExercise,
     retrieveAllMuscles,
     retrieveCurrentSoreness,
@@ -59,7 +61,7 @@ import Network.Wai.Parse (FileInfo (fileContent, fileName))
 import Safe.Foldable (maximumByMay)
 import System.IO (FilePath, IO)
 import Util (packShowLazy)
-import Views (exerciseFormDescriptionParam, exerciseFormFilesToDeleteParam, exerciseFormMusclesParam, exerciseFormNameParam, viewChooseOuter, viewConcreteMuscleGroupExercisesOuter, viewExerciseDeletion, viewExerciseListOuter, viewPageCurrentHtml)
+import Views (exerciseFormDescriptionParam, exerciseFormFilesToDeleteParam, exerciseFormMusclesParam, exerciseFormNameParam, muscleIdForMuscleSorenessFromHtml, viewChooseOuter, viewConcreteMuscleGroupExercisesOuter, viewExerciseDeletion, viewExerciseListOuter, viewPageCurrentHtml)
 import Web.Scotty (ActionM, Parsable (parseParam, parseParamList), capture, files, finish, formParam, formParamMaybe, formParams, get, html, middleware, pathParam, post, queryParamMaybe, raw, redirect, scotty, status, text)
 import Prelude (Either (Left, Right))
 
@@ -102,12 +104,6 @@ finishWithBadRequest message = do
   status status400
   text message
   finish
-
-withMuscle :: IdType -> [Muscle] -> (Muscle -> ActionM a) -> ActionM a
-withMuscle muscleId allMuscles f =
-  case find (\m -> m.id == muscleId) allMuscles of
-    Nothing -> finishWithBadRequest ("I couldn't parse the muscle you gave me: " <> packShowLazy muscleId)
-    Just muscle -> f muscle
 
 main :: IO ()
 main = do
@@ -272,24 +268,30 @@ main = do
       redirect "/"
 
     post "/update-soreness" do
-      muscleId <- formParam "muscle"
-      howSore' <- formParam "how-sore"
+      allParameters <- formParams
+      let sorenessParams :: [(Int64, SorenessScalar)]
+          sorenessParams =
+            mapMaybe
+              ( \(name, soreness) ->
+                  case muscleIdForMuscleSorenessFromHtml name of
+                    Nothing -> Nothing
+                    Just muscleId ->
+                      case decimal @Int soreness of
+                        Left _ -> Nothing
+                        Right (sorenessInt, _) ->
+                          if sorenessInt == 0
+                            then Just (muscleId, NotSore)
+                            else
+                              if sorenessInt == 1
+                                then Just (muscleId, LittleSore)
+                                else Just (muscleId, VerySore)
+              )
+              allParameters
 
-      withDatabase \conn -> do
-        allMuscles <- retrieveAllMuscles conn
-        withMuscle muscleId allMuscles \muscle -> do
-          currentTime <- liftIO getCurrentTime
-          updateSoreness conn muscle.id howSore' currentTime
-          redirect "/"
-
-    post "/reset-soreness" do
-      muscleId <- formParam "muscle"
       currentTime <- liftIO getCurrentTime
-
       withDatabase \conn -> do
-        updateSoreness conn muscleId notSore currentTime
-
-      redirect "/"
+        mapM_ (\(muscleId, soreness) -> updateSoreness conn muscleId soreness currentTime) sorenessParams
+        redirect "/"
 
     post "/commit-workout" do
       withDatabase commitWorkout
