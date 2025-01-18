@@ -11,6 +11,7 @@ module Views
     viewChooseOuter,
     viewConcreteMuscleGroupExercisesOuter,
     viewExerciseDeletion,
+    viewStats,
     exerciseFormMusclesParam,
     exerciseFormFilesToDeleteParam,
     exerciseFormCategoryParam,
@@ -31,6 +32,7 @@ import Data.Functor ((<$>))
 import Data.Int (Int, Int64)
 import Data.List (filter, zip)
 import Data.List.Split (chunksOf)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, isJust, maybe)
 import Data.Monoid (Monoid (mempty))
 import Data.Ord (Ord ((<=)), comparing, (>), (>=))
@@ -38,6 +40,7 @@ import Data.Semigroup (Semigroup ((<>)))
 import Data.Set qualified as Set
 import Data.String (IsString)
 import Data.Text (Text, breakOnEnd, pack, replace)
+import Data.Text.Lazy qualified as TL
 import Data.Text.Read (decimal)
 import Data.Time.Clock (UTCTime (utctDay, utctDayTime), diffUTCTime, nominalDay)
 import Data.Time.Format (defaultTimeLocale, formatTime)
@@ -45,7 +48,7 @@ import Data.Traversable (forM)
 import Data.Tuple (fst)
 import Lucid qualified as L
 import Lucid.Base (makeAttributes)
-import Myocardio.DatabaseNew (ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), littleSore, notSore, verySore)
+import Myocardio.DatabaseNew (ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), sorenessScalarToInt)
 import Myocardio.DatabaseNew qualified as DBN
 import Safe (maximumByMay)
 import Safe.Foldable (minimumMay)
@@ -609,7 +612,7 @@ viewSorenessForm musclesInvolved currentSoreness = do
                 L.type_ "radio",
                 L.name_ (htmlIdForMuscleSoreness muscle'),
                 L.id_ ("notsore" <> packShow muscle'.id),
-                L.value_ (packShow notSore),
+                L.value_ (packShow @Int (sorenessScalarToInt NotSore)),
                 if any (\soreness -> soreness.muscle.id == muscle'.id && soreness.soreness /= NotSore) currentSoreness
                   then mempty
                   else L.checked_
@@ -620,7 +623,7 @@ viewSorenessForm musclesInvolved currentSoreness = do
                 L.type_ "radio",
                 L.name_ (htmlIdForMuscleSoreness muscle'),
                 L.id_ ("alittle" <> packShow muscle'.id),
-                L.value_ (packShow littleSore),
+                L.value_ (packShow @Int (sorenessScalarToInt LittleSore)),
                 if any (\soreness -> soreness.muscle.id == muscle'.id && soreness.soreness == LittleSore) currentSoreness
                   then L.checked_
                   else mempty
@@ -631,7 +634,7 @@ viewSorenessForm musclesInvolved currentSoreness = do
                 L.type_ "radio",
                 L.name_ (htmlIdForMuscleSoreness muscle'),
                 L.id_ ("verysore" <> packShow muscle'.id),
-                L.value_ (packShow verySore),
+                L.value_ (packShow @Int (sorenessScalarToInt VerySore)),
                 if any (\soreness -> soreness.muscle.id == muscle'.id && soreness.soreness == VerySore) currentSoreness
                   then L.checked_
                   else mempty
@@ -685,3 +688,15 @@ viewExerciseDeletion exerciseId name = viewHtmlSkeleton (PageExerciseDeletion ex
     L.form_ [L.action_ ("/remove-exercise/" <> packShow exerciseId)] do
       L.input_ [L.type_ "hidden", L.name_ "sure", L.value_ "yes"]
       L.button_ [L.type_ "submit", L.class_ "btn btn-danger"] "Yes"
+
+viewStats :: Map.Map DBN.Muscle TL.Text -> L.Html ()
+viewStats muscleToSvg =
+  viewHtmlSkeleton
+    PageStats
+    ( forM_ (chunksOf 2 (Map.toList muscleToSvg)) \muscleRow -> do
+        L.div_ [L.class_ "row"] do
+          forM_ muscleRow \(muscle, svg) -> do
+            L.div_ [L.class_ "col-lg-6 col-12"] do
+              L.h5_ (L.toHtml muscle.name)
+              L.toHtmlRaw svg
+    )

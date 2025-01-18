@@ -68,6 +68,9 @@ executable myocardio-exe
     , lucid2
     , cmark-gfm
     , http-types
+    , Chart
+    , Chart-cairo
+    , temporary
 
 test-suite myocardio-tests
   import: shared-properties, warnings

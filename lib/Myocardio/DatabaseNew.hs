@@ -10,7 +10,10 @@ module Myocardio.DatabaseNew
     ExerciseDescription (..),
     ExerciseWorkout (..),
     Muscle (..),
+    retrieveMusclesWithDates,
+    MuscleWithWorkoutTime (MuscleWithWorkoutTime, muscleId, muscleName, year, week),
     Soreness (..),
+    sorenessScalarToInt,
     ExerciseCommitted (..),
     MuscleWithWorkout (..),
     MigrationFlags (..),
@@ -19,9 +22,6 @@ module Myocardio.DatabaseNew
     SorenessScalar (..),
     withDatabase,
     retrieveLastWorkout,
-    notSore,
-    littleSore,
-    verySore,
     retrieveFile,
     migrateDatabase,
     openDatabase,
@@ -83,7 +83,7 @@ import System.Environment.XDG.BaseDir (getUserConfigDir, getUserDataDir)
 import System.IO (FilePath, IO)
 import Text.Show (Show, show)
 import UnliftIO.Exception (bracket)
-import Prelude (error)
+import Prelude (Num, error)
 
 type IdType = Int64
 
@@ -139,6 +139,11 @@ instance FromField SorenessScalar where
             else Ok VerySore
     _ -> returnError ConversionFailed f "expecting an SQLInteger column type"
 
+sorenessScalarToInt :: (Num a) => SorenessScalar -> a
+sorenessScalarToInt NotSore = 0
+sorenessScalarToInt LittleSore = 1
+sorenessScalarToInt VerySore = 2
+
 instance ToField SorenessScalar where
   toField NotSore = SQLInteger 0
   toField LittleSore = SQLInteger 1
@@ -150,15 +155,6 @@ data Soreness = Soreness
     time :: !UTCTime
   }
   deriving (Show)
-
-notSore :: Int
-notSore = 0
-
-littleSore :: Int
-littleSore = 1
-
-verySore :: Int
-verySore = 2
 
 data ExerciseDescription = ExerciseDescription
   { id :: !IdType,
@@ -534,3 +530,15 @@ retrieveLastWorkout :: forall m. (MonadIO m) => Connection -> m [ExerciseWithWor
 retrieveLastWorkout conn = liftIO do
   results <- query_ conn (processExercisesWithWorkoutsQueryBase <> " WHERE DATE(time) IN (SELECT DATE(time) FROM ExerciseWithIntensity WHERE committed = 1 ORDER BY time DESC LIMIT 1)")
   processExercisesWithWorkouts results
+
+data MuscleWithWorkoutTime = MuscleWithWorkoutTime
+  { muscleId :: IdType,
+    muscleName :: Text,
+    year :: Int,
+    week :: Int
+  }
+
+retrieveMusclesWithDates :: forall m. (MonadIO m) => Connection -> m [MuscleWithWorkoutTime]
+retrieveMusclesWithDates conn = liftIO do
+  results <- query_ conn ("SELECT EHM.muscle_id, M.name, CAST(STRFTIME('%Y', time) as INTEGER) year, CAST(STRFTIME('%W', time) AS INTEGER) week FROM ExerciseWithIntensity EWI INNER JOIN ExerciseHasMuscle EHM ON EHM.exercise_id = EWI.exercise_id INNER JOIN Muscle M ON M.id == EHM.muscle_id ORDER BY EHM.muscle_id") :: IO [(IdType, Text, Int, Int)]
+  pure ((\(muscleId, muscleName, year, week) -> MuscleWithWorkoutTime muscleId muscleName year week) <$> results)
