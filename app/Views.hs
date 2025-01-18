@@ -16,17 +16,19 @@ module Views
     exerciseFormCategoryParam,
     exerciseFormDescriptionParam,
     exerciseFormNameParam,
+    muscleIdForMuscleSorenessFromHtml,
   )
 where
 
 import CMarkGFM (commonmarkToHtml)
 import Control.Monad (unless, void, when, (>>=))
-import Data.Bool (Bool (True), not, otherwise)
-import Data.Eq (Eq, (==))
+import Data.Bool (Bool (True), not, otherwise, (&&))
+import Data.Either (Either (Left, Right))
+import Data.Eq (Eq, (/=), (==))
 import Data.Foldable (Foldable (elem), any, find, foldMap, forM_, for_, mapM_)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
-import Data.Int (Int)
+import Data.Int (Int, Int64)
 import Data.List (filter, zip)
 import Data.List.Split (chunksOf)
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, isJust, maybe)
@@ -35,14 +37,15 @@ import Data.Ord (Ord ((<=)), comparing, (>))
 import Data.Semigroup (Semigroup ((<>)))
 import Data.Set qualified as Set
 import Data.String (IsString)
-import Data.Text (Text, pack, replace)
+import Data.Text (Text, breakOnEnd, pack, replace)
+import Data.Text.Read (decimal)
 import Data.Time.Clock (UTCTime (utctDay, utctDayTime), diffUTCTime, nominalDay)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Traversable (forM)
 import Data.Tuple (fst)
 import Lucid qualified as L
 import Lucid.Base (makeAttributes)
-import Myocardio.DatabaseNew (ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, littleSore, verySore)
+import Myocardio.DatabaseNew (ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), littleSore, notSore, verySore)
 import Myocardio.DatabaseNew qualified as DBN
 import Safe (lastMay, maximumByMay)
 import Util (packShow)
@@ -137,23 +140,10 @@ makeId (HtmlId i) = L.id_ i
 makeHref :: HtmlId -> L.Attributes
 makeHref (HtmlId i) = L.href_ ("#" <> i)
 
-sorenessValueToEmoji :: Int -> Text
-sorenessValueToEmoji 0 = ""
-sorenessValueToEmoji 1 = "😕"
-sorenessValueToEmoji _ = "😭"
-
-sorenessOutput :: [DBN.Soreness] -> L.Html ()
-sorenessOutput soreness = do
-  let sorenessToHtml :: DBN.Soreness -> L.Html ()
-      sorenessToHtml soreness' = L.li_ $ L.form_ [L.action_ "/reset-soreness", L.method_ "post"] do
-        L.input_ [L.type_ "hidden", L.name_ "muscle", L.value_ (packShow soreness'.muscleId)]
-        L.span_ [L.class_ "me-1"] (L.toHtml (sorenessValueToEmoji soreness'.soreness))
-        L.strong_ [L.class_ "me-1"] (L.toHtml soreness'.muscleName)
-        L.button_
-          [L.type_ "submit", L.class_ "btn btn-link"]
-          "Reset"
-  L.div_ [L.id_ "soreness-output"] do
-    L.ul_ (mapM_ sorenessToHtml soreness)
+sorenessValueToEmoji :: DBN.SorenessScalar -> Text
+sorenessValueToEmoji NotSore = "😌"
+sorenessValueToEmoji LittleSore = "😕"
+sorenessValueToEmoji VerySore = "😭"
 
 idCurrentWorkout :: HtmlId
 idCurrentWorkout = HtmlId "current-workout"
@@ -163,41 +153,6 @@ idSoreness = HtmlId "soreness"
 
 idExerciseHistory :: HtmlId
 idExerciseHistory = HtmlId "exercise-history"
-
-viewSorenessForm :: [Muscle] -> [DBN.Soreness] -> L.Html ()
-viewSorenessForm allMuscles soreness = do
-  L.form_ [L.action_ "/update-soreness", L.method_ "post"] do
-    L.div_ [L.class_ "mb-2"] do
-      L.div_ [L.class_ "form-floating"] do
-        let muscleOption :: DBN.Muscle -> L.Html ()
-            muscleOption muscle' = L.option_ [L.value_ (packShow muscle'.id)] (L.toHtml muscle'.name)
-        L.select_ [L.class_ "form-select", L.id_ "i-am-sore", L.name_ "muscle"] (mapM_ muscleOption allMuscles)
-        L.label_ [L.for_ "i-am-sore"] "I am sore here"
-    L.div_ [L.class_ "d-flex justify-content-evenly align-items-center mb-2"] do
-      L.input_
-        [ L.class_ "btn-check",
-          L.type_ "radio",
-          L.name_ "how-sore",
-          L.id_ "verysore",
-          L.value_ (packShow verySore),
-          L.checked_
-        ]
-      L.label_ [L.class_ "btn", L.for_ "verysore"] (L.toHtml $ sorenessValueToEmoji 2 <> " VERY")
-      L.input_
-        [ L.class_ "btn-check",
-          L.type_ "radio",
-          L.name_ "how-sore",
-          L.id_ "alittle",
-          L.value_ (packShow littleSore)
-        ]
-      L.label_ [L.class_ "btn", L.for_ "alittle"] (L.toHtml $ sorenessValueToEmoji 1 <> " A LITTLE")
-    L.div_ [L.class_ "d-flex justify-content-center"] do
-      L.button_
-        [ L.class_ "btn btn-primary",
-          L.type_ "submit"
-        ]
-        "Submit"
-  sorenessOutput soreness
 
 dayDiffText :: UTCTime -> UTCTime -> Text
 dayDiffText currentTime before =
@@ -336,7 +291,7 @@ viewSingleExerciseInChooser currentTime muscle' sorenessHistory exerciseWithWork
             case firstSorenessAfterLastExecution muscle' sorenessHistory lastExecutionInstance of
               Nothing -> L.span_ [L.class_ "text-danger"] "Soreness unresolved!"
               Just lastSoreness ->
-                if lastSoreness.soreness == DBN.notSore
+                if lastSoreness.soreness == DBN.NotSore
                   then L.span_ [L.class_ "text-success"] $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji lastSoreness.soreness
                   else L.span_ $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji lastSoreness.soreness
             L.br_ []
@@ -432,15 +387,15 @@ viewConcreteMuscleGroupExercises currentTime sorenessHistory allExercises muscle
 
 viewChoose :: [DBN.Muscle] -> [DBN.Soreness] -> [DBN.ExerciseWithWorkouts] -> L.Html ()
 viewChoose allMuscles' sorenessHistory currentTraining = do
-  let currentMuscleSoreness :: DBN.Muscle -> Int
+  let currentMuscleSoreness :: DBN.Muscle -> DBN.SorenessScalar
       currentMuscleSoreness muscle =
-        fromMaybe 0 ((\s -> s.soreness) <$> find (\s -> s.muscleId == muscle.id) sorenessHistory)
+        fromMaybe NotSore ((\s -> s.soreness) <$> find (\s -> s.muscleId == muscle.id) sorenessHistory)
       viewButtonClass muscle'
         | inCurrentTraining currentTraining muscle' =
-            if currentMuscleSoreness muscle' == 0
+            if currentMuscleSoreness muscle' == NotSore
               then "btn btn-secondary w-100"
               else "btn btn-danger w-100"
-        | currentMuscleSoreness muscle' == 0 = "btn btn-primary w-100"
+        | currentMuscleSoreness muscle' == NotSore = "btn btn-primary w-100"
         | otherwise = "btn btn-warning w-100"
       viewButton :: DBN.Muscle -> L.Html ()
       viewButton muscle' = do
@@ -629,13 +584,23 @@ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout sorenessHistor
         L.span_ "Last Workout"
   viewCurrentWorkout allMuscles' exercises
   L.hr_ [L.class_ "mb-3"]
-  viewLastWorkout currentTime lastWorkout
-  L.hr_ [L.class_ "mb-3"]
-  viewSorenessForm allMuscles' sorenessHistory
+  viewLastWorkout currentTime lastWorkout sorenessHistory
 
-viewLastWorkout :: UTCTime -> [DBN.ExerciseWithWorkouts] -> L.Html ()
-viewLastWorkout _ [] = mempty
-viewLastWorkout currentTime exercises@(e : _) = case Set.elems e.workouts of
+htmlIdForMuscleSoreness :: Muscle -> Text
+htmlIdForMuscleSoreness muscle = "how-sore" <> packShow muscle.id
+
+muscleIdForMuscleSorenessFromHtml :: Text -> Maybe Int64
+muscleIdForMuscleSorenessFromHtml x =
+  case breakOnEnd "how-sore" x of
+    ("how-sore", muscleIdStr) ->
+      case decimal muscleIdStr of
+        Left _errorString -> Nothing
+        Right (muscleId, _remainder) -> Just muscleId
+    _ -> Nothing
+
+viewLastWorkout :: UTCTime -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> L.Html ()
+viewLastWorkout _ [] _ = mempty
+viewLastWorkout currentTime exercises@(e : _) currentSoreness = case Set.elems e.workouts of
   [] -> mempty
   (workout : _) -> do
     let musclesInvolved :: [DBN.Muscle]
@@ -644,11 +609,56 @@ viewLastWorkout currentTime exercises@(e : _) = case Set.elems e.workouts of
     L.h4_ do
       "Last workout: "
       L.em_ (L.toHtml (dayDiffText currentTime workout.time))
-    L.div_ [L.class_ "gap-1 mb-3"] do
-      L.span_ [L.class_ "text-muted me-1"] "Trained: "
-      forM_ musclesInvolved \muscle' -> L.span_ [L.class_ "badge text-bg-success me-1"] (L.toHtml muscle'.name)
+    L.form_ [L.action_ "/update-soreness", L.method_ "post"] do
+      L.div_ [L.class_ "gap-1 mb-3"] do
+        L.span_ [L.class_ "text-muted me-1"] "Trained: "
+        L.table_ do
+          L.tbody_ do
+            forM_ musclesInvolved \muscle' -> L.tr_ do
+              L.td_ (L.toHtml muscle'.name)
+              L.td_ do
+                L.div_ [L.class_ "btn-group"] do
+                  L.input_
+                    [ L.class_ "btn-check",
+                      L.type_ "radio",
+                      L.name_ (htmlIdForMuscleSoreness muscle'),
+                      L.id_ ("notsore" <> packShow muscle'.id),
+                      L.value_ (packShow notSore),
+                      if any (\soreness -> soreness.muscleId == muscle'.id && soreness.soreness /= NotSore) currentSoreness
+                        then mempty
+                        else L.checked_
+                    ]
+                  L.label_ [L.class_ "btn btn-outline-primary", L.for_ ("notsore" <> packShow muscle'.id)] (L.toHtml $ sorenessValueToEmoji NotSore <> " NOT")
+                  L.input_
+                    [ L.class_ "btn-check",
+                      L.type_ "radio",
+                      L.name_ (htmlIdForMuscleSoreness muscle'),
+                      L.id_ ("alittle" <> packShow muscle'.id),
+                      L.value_ (packShow littleSore),
+                      if any (\soreness -> soreness.muscleId == muscle'.id && soreness.soreness == LittleSore) currentSoreness
+                        then L.checked_
+                        else mempty
+                    ]
+                  L.label_ [L.class_ "btn btn-outline-primary", L.for_ ("alittle" <> packShow muscle'.id)] (L.toHtml $ sorenessValueToEmoji LittleSore <> " A LITTLE")
+                  L.input_
+                    [ L.class_ "btn-check",
+                      L.type_ "radio",
+                      L.name_ (htmlIdForMuscleSoreness muscle'),
+                      L.id_ ("verysore" <> packShow muscle'.id),
+                      L.value_ (packShow verySore),
+                      if any (\soreness -> soreness.muscleId == muscle'.id && soreness.soreness == VerySore) currentSoreness
+                        then L.checked_
+                        else mempty
+                    ]
+                  L.label_ [L.class_ "btn btn-outline-primary", L.for_ ("verysore" <> packShow muscle'.id)] (L.toHtml $ sorenessValueToEmoji VerySore <> " VERY")
+        L.button_ [L.class_ "btn btn-primary mt-3", L.type_ "submit"] "💪 Update soreness"
+
+      L.div_ [L.class_ "gap-1 mb-3"] do
+        L.span_ [L.class_ "text-muted me-1"] "Exercises: "
+        L.ul_ do
+          forM_ exercises \exercise' -> L.li_ (L.toHtml exercise'.name)
     L.form_ [L.action_ "/repeat-last"] do
-      L.button_ [L.class_ "btn btn-primary"] "Repeat this workout"
+      L.button_ [L.class_ "btn btn-primary"] "♻️ Repeat this workout"
 
 viewChooseOuter :: [DBN.Muscle] -> [DBN.Soreness] -> [DBN.ExerciseWithWorkouts] -> L.Html ()
 viewChooseOuter allMuscles' sorenessHistory currentTraining =

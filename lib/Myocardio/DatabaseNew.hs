@@ -15,6 +15,7 @@ module Myocardio.DatabaseNew
     MuscleWithWorkout (..),
     MigrationFlags (..),
     IdType,
+    SorenessScalar (..),
     withDatabase,
     retrieveLastWorkout,
     notSore,
@@ -69,7 +70,10 @@ import Data.String (String)
 import Data.Text (Text, pack, unpack)
 import Data.Time (UTCTime)
 import Data.Tuple (uncurry)
-import Database.SQLite.Simple (Connection, Only (Only, fromOnly), Query, SQLError, ToRow, changes, close, execute, execute_, lastInsertRowId, open, query, query_, withTransaction)
+import Database.SQLite.Simple (Connection, Only (Only, fromOnly), Query, SQLData (SQLInteger), SQLError, ToRow, changes, close, execute, execute_, lastInsertRowId, open, query, query_, withTransaction)
+import Database.SQLite.Simple.FromField (FromField (fromField), ResultError (ConversionFailed), fieldData, returnError)
+import Database.SQLite.Simple.Ok (Ok (Ok))
+import Database.SQLite.Simple.ToField (ToField (toField))
 import Myocardio.DatabaseOld qualified as DatabaseJson
 import Myocardio.DatabaseOld qualified as OldDb
 import Myocardio.MapUtils (insertMMap, insertMSet, multiInsertMMap)
@@ -115,10 +119,28 @@ data MuscleWithWorkout = MuscleWithWorkout
     workoutTime :: !UTCTime
   }
 
+data SorenessScalar = NotSore | LittleSore | VerySore deriving (Eq, Show)
+
+instance FromField SorenessScalar where
+  fromField f = case fieldData f of
+    SQLInteger b ->
+      if b == 0
+        then Ok NotSore
+        else
+          if b == 1
+            then Ok LittleSore
+            else Ok VerySore
+    _ -> returnError ConversionFailed f "expecting an SQLInteger column type"
+
+instance ToField SorenessScalar where
+  toField NotSore = SQLInteger 0
+  toField LittleSore = SQLInteger 1
+  toField _ = SQLInteger 2
+
 data Soreness = Soreness
   { muscleId :: !IdType,
     muscleName :: !Text,
-    soreness :: !Int,
+    soreness :: !SorenessScalar,
     time :: !UTCTime
   }
   deriving (Show)
@@ -278,7 +300,7 @@ retrieveCurrentSoreness connection = do
         \ LEFT JOIN Soreness R ON L.muscle_id = R.muscle_id AND L.time < R.time \
         \ INNER JOIN Muscle M ON M.id == L.muscle_id \
         \ WHERE R.muscle_id IS NULL AND L.soreness > 0" ::
-      m [(Text, IdType, Int, UTCTime)]
+      m [(Text, IdType, SorenessScalar, UTCTime)]
 
   pure ((\(muscleName, muscleId, soreness, time) -> Soreness muscleId muscleName soreness time) <$> results)
 
@@ -294,7 +316,7 @@ retrieveSorenessHistory connection = do
         \ M.name, L.muscle_id, L.soreness, L.time \
         \ FROM Soreness L \
         \ INNER JOIN Muscle M ON M.id == L.muscle_id" ::
-      m [(Text, IdType, Int, UTCTime)]
+      m [(Text, IdType, SorenessScalar, UTCTime)]
 
   pure ((\(muscleName, muscleId, soreness, time) -> Soreness muscleId muscleName soreness time) <$> results)
 
@@ -483,7 +505,7 @@ changeIntensity :: forall m. (MonadIO m) => Connection -> IdType -> Text -> m ()
 changeIntensity conn exerciseId intensity = liftIO do
   execute conn "UPDATE ExerciseWithIntensity SET intensity = ? WHERE exercise_id = ? AND committed = ?" (intensity, exerciseId, 0 :: Int)
 
-updateSoreness :: forall m. (MonadIO m) => Connection -> IdType -> Int -> UTCTime -> m ()
+updateSoreness :: forall m. (MonadIO m) => Connection -> IdType -> SorenessScalar -> UTCTime -> m ()
 updateSoreness conn muscleId soreness currentTime = liftIO do
   execute conn "INSERT INTO Soreness (muscle_id, soreness, time) VALUES (?, ?, ?)" (muscleId, soreness, currentTime)
 
