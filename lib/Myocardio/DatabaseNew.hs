@@ -138,8 +138,7 @@ instance ToField SorenessScalar where
   toField _ = SQLInteger 2
 
 data Soreness = Soreness
-  { muscleId :: !IdType,
-    muscleName :: !Text,
+  { muscle :: !Muscle,
     soreness :: !SorenessScalar,
     time :: !UTCTime
   }
@@ -302,7 +301,7 @@ retrieveCurrentSoreness connection = do
         \ WHERE R.muscle_id IS NULL AND L.soreness > 0" ::
       m [(Text, IdType, SorenessScalar, UTCTime)]
 
-  pure ((\(muscleName, muscleId, soreness, time) -> Soreness muscleId muscleName soreness time) <$> results)
+  pure ((\(muscleName, muscleId, soreness, time) -> Soreness (Muscle muscleId muscleName) soreness time) <$> results)
 
 -- Calculate all soreness values and return as a flat list - the user
 -- can filter group as they see fit
@@ -318,7 +317,7 @@ retrieveSorenessHistory connection = do
         \ INNER JOIN Muscle M ON M.id == L.muscle_id" ::
       m [(Text, IdType, SorenessScalar, UTCTime)]
 
-  pure ((\(muscleName, muscleId, soreness, time) -> Soreness muscleId muscleName soreness time) <$> results)
+  pure ((\(muscleName, muscleId, soreness, time) -> Soreness (Muscle muscleId muscleName) soreness time) <$> results)
 
 data ExerciseCommitted = Committed | NotCommitted
 
