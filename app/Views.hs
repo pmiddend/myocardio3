@@ -25,7 +25,7 @@ import Control.Monad (unless, void, when, (>>=))
 import Data.Bool (Bool (True), not, otherwise, (&&))
 import Data.Either (Either (Left, Right))
 import Data.Eq (Eq, (/=), (==))
-import Data.Foldable (Foldable (elem), any, find, foldMap, forM_, for_, mapM_)
+import Data.Foldable (Foldable (elem), any, find, foldMap, foldr, forM_, for_, mapM_)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
 import Data.Int (Int, Int64)
@@ -137,9 +137,6 @@ htmlIdFromText = replace " " "_"
 makeId :: HtmlId -> L.Attributes
 makeId (HtmlId i) = L.id_ i
 
-makeHref :: HtmlId -> L.Attributes
-makeHref (HtmlId i) = L.href_ ("#" <> i)
-
 sorenessValueToEmoji :: DBN.SorenessScalar -> Text
 sorenessValueToEmoji NotSore = "😌"
 sorenessValueToEmoji LittleSore = "😕"
@@ -147,12 +144,6 @@ sorenessValueToEmoji VerySore = "😭"
 
 idCurrentWorkout :: HtmlId
 idCurrentWorkout = HtmlId "current-workout"
-
-idSoreness :: HtmlId
-idSoreness = HtmlId "soreness"
-
-idExerciseHistory :: HtmlId
-idExerciseHistory = HtmlId "exercise-history"
 
 dayDiffText :: UTCTime -> UTCTime -> Text
 dayDiffText currentTime before =
@@ -270,7 +261,7 @@ firstSorenessAfterLastExecution :: Muscle -> [Soreness] -> ExerciseWorkout -> Ma
 firstSorenessAfterLastExecution muscle' sorenessHistory lastExecution =
   let beginningOfDayAfterLastWorkout :: UTCTime
       beginningOfDayAfterLastWorkout = lastExecution.time {utctDay = succ lastExecution.time.utctDay, utctDayTime = 1}
-      sorenessHistoryForThisMuscle = filter (\soreness -> soreness.muscleId == muscle'.id) sorenessHistory
+      sorenessHistoryForThisMuscle = filter (\soreness -> soreness.muscle == muscle') sorenessHistory
    in find
         (\soreness -> soreness.time > beginningOfDayAfterLastWorkout)
         sorenessHistoryForThisMuscle
@@ -389,7 +380,7 @@ viewChoose :: [DBN.Muscle] -> [DBN.Soreness] -> [DBN.ExerciseWithWorkouts] -> L.
 viewChoose allMuscles' sorenessHistory currentTraining = do
   let currentMuscleSoreness :: DBN.Muscle -> DBN.SorenessScalar
       currentMuscleSoreness muscle =
-        fromMaybe NotSore ((\s -> s.soreness) <$> find (\s -> s.muscleId == muscle.id) sorenessHistory)
+        fromMaybe NotSore ((\s -> s.soreness) <$> find (\s -> s.muscle == muscle) sorenessHistory)
       viewButtonClass muscle'
         | inCurrentTraining currentTraining muscle' =
             if currentMuscleSoreness muscle' == NotSore
@@ -570,21 +561,10 @@ viewExerciseList allMuscles' exercises existingExercise = do
     L.div_ [L.class_ "alert alert-light"] (viewExerciseDescriptionHtml exercise')
 
 viewPageCurrentHtml :: UTCTime -> [DBN.Muscle] -> [DBN.ExerciseWithWorkouts] -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> L.Html ()
-viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout sorenessHistory = viewHtmlSkeleton PageCurrent $ do
-  L.div_ [L.class_ "text-bg-light p-2"] do
-    L.ul_ $ do
-      L.li_ $ L.a_ [makeHref idCurrentWorkout] do
-        iconHtml "joystick"
-        L.span_ "Current"
-      L.li_ $ L.a_ [makeHref idSoreness] do
-        iconHtml "graph-down-arrow"
-        L.span_ "Soreness"
-      L.li_ $ L.a_ [makeHref idExerciseHistory] do
-        iconHtml "clipboard-data-fill"
-        L.span_ "Last Workout"
+viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness = viewHtmlSkeleton PageCurrent $ do
   viewCurrentWorkout allMuscles' exercises
   L.hr_ [L.class_ "mb-3"]
-  viewLastWorkout currentTime lastWorkout sorenessHistory
+  viewLastWorkout currentTime lastWorkout currentSoreness
 
 htmlIdForMuscleSoreness :: Muscle -> Text
 htmlIdForMuscleSoreness muscle = "how-sore" <> packShow muscle.id
@@ -604,7 +584,11 @@ viewLastWorkout currentTime exercises@(e : _) currentSoreness = case Set.elems e
   [] -> mempty
   (workout : _) -> do
     let musclesInvolved :: [DBN.Muscle]
-        musclesInvolved = Set.toList (foldMap (.muscles) exercises)
+        musclesInvolved =
+          Set.toList
+            ( foldMap (.muscles) exercises
+                <> foldr (Set.insert . (.muscle)) mempty currentSoreness
+            )
 
     L.h4_ do
       "Last workout: "
@@ -624,7 +608,7 @@ viewLastWorkout currentTime exercises@(e : _) currentSoreness = case Set.elems e
                       L.name_ (htmlIdForMuscleSoreness muscle'),
                       L.id_ ("notsore" <> packShow muscle'.id),
                       L.value_ (packShow notSore),
-                      if any (\soreness -> soreness.muscleId == muscle'.id && soreness.soreness /= NotSore) currentSoreness
+                      if any (\soreness -> soreness.muscle.id == muscle'.id && soreness.soreness /= NotSore) currentSoreness
                         then mempty
                         else L.checked_
                     ]
@@ -635,7 +619,7 @@ viewLastWorkout currentTime exercises@(e : _) currentSoreness = case Set.elems e
                       L.name_ (htmlIdForMuscleSoreness muscle'),
                       L.id_ ("alittle" <> packShow muscle'.id),
                       L.value_ (packShow littleSore),
-                      if any (\soreness -> soreness.muscleId == muscle'.id && soreness.soreness == LittleSore) currentSoreness
+                      if any (\soreness -> soreness.muscle.id == muscle'.id && soreness.soreness == LittleSore) currentSoreness
                         then L.checked_
                         else mempty
                     ]
@@ -646,7 +630,7 @@ viewLastWorkout currentTime exercises@(e : _) currentSoreness = case Set.elems e
                       L.name_ (htmlIdForMuscleSoreness muscle'),
                       L.id_ ("verysore" <> packShow muscle'.id),
                       L.value_ (packShow verySore),
-                      if any (\soreness -> soreness.muscleId == muscle'.id && soreness.soreness == VerySore) currentSoreness
+                      if any (\soreness -> soreness.muscle.id == muscle'.id && soreness.soreness == VerySore) currentSoreness
                         then L.checked_
                         else mempty
                     ]
