@@ -49,6 +49,7 @@ import Myocardio.DatabaseNew
     retrieveExercisesWithWorkouts,
     retrieveFile,
     retrieveLastWorkout,
+    retrieveMusclesTrainedHistory,
     retrieveSorenessHistory,
     toggleExercise,
     updateExercise,
@@ -115,7 +116,8 @@ main = do
         currentSoreness <- retrieveCurrentSoreness connection
         lastWorkout <- retrieveLastWorkout connection
         currentTime <- liftIO getCurrentTime
-        html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness
+        musclesLastWeek <- retrieveMusclesTrainedHistory connection 7
+        html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesLastWeek
 
     get "/repeat-last" do
       withDatabase \connection -> do
@@ -130,7 +132,8 @@ main = do
         allMuscles' <- retrieveAllMuscles connection
         exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
         currentSoreness <- retrieveCurrentSoreness connection
-        html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness
+        musclesLastWeek <- retrieveMusclesTrainedHistory connection 7
+        html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesLastWeek
 
     get "/exercises" do
       withDatabase \connection -> do

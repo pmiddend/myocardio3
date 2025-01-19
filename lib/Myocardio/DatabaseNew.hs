@@ -15,6 +15,7 @@ module Myocardio.DatabaseNew
     MuscleWithWorkout (..),
     MigrationFlags (..),
     IdType,
+    retrieveMusclesTrainedHistory,
     SorenessScalar (..),
     withDatabase,
     retrieveLastWorkout,
@@ -49,7 +50,7 @@ import Control.Exception (catch)
 import Control.Monad (mapM_, when)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.IO.Unlift (MonadUnliftIO)
-import Data.Bool (Bool (True))
+import Data.Bool (Bool (False, True))
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
 import Data.Eq (Eq ((==)))
@@ -66,7 +67,7 @@ import Data.Ord (Ord ((<=)), (>))
 import Data.Semigroup ((<>))
 import Data.Set (Set)
 import Data.Set qualified as Set
-import Data.String (String)
+import Data.String (IsString (fromString), String)
 import Data.Text (Text, pack, unpack)
 import Data.Time (UTCTime)
 import Data.Tuple (uncurry)
@@ -120,6 +121,12 @@ data MuscleWithWorkout = MuscleWithWorkout
   }
 
 data SorenessScalar = NotSore | LittleSore | VerySore deriving (Eq, Show)
+
+instance Ord SorenessScalar where
+  NotSore <= _ = True
+  LittleSore <= NotSore = False
+  LittleSore <= _ = True
+  VerySore <= _ = False
 
 instance FromField SorenessScalar where
   fromField f = case fieldData f of
@@ -283,6 +290,17 @@ openDatabase url = liftIO (open url)
 
 closeDatabase :: (MonadIO m) => Connection -> m ()
 closeDatabase = liftIO . close
+
+retrieveMusclesTrainedHistory :: forall m. (MonadIO m) => Connection -> Int -> m [Muscle]
+retrieveMusclesTrainedHistory connection days = do
+  results <-
+    liftIO $
+      query_
+        connection
+        (fromString $ "SELECT M.id, M.name, MAX(time) FROM ExerciseWithIntensity EWI INNER JOIN ExerciseHasMuscle EHM ON EHM.exercise_id = EWI.exercise_id INNER JOIN Muscle M ON M.id == EHM.muscle_id WHERE EWI.time > date('now', '-" <> show days <> " day') GROUP BY M.id") ::
+      m [(IdType, Text, UTCTime)]
+
+  pure ((\(muscleId, muscleName, _lastWorkout) -> Muscle muscleId muscleName) <$> results)
 
 -- For every muscle, calculate the latest soreness value
 retrieveCurrentSoreness :: forall m. (MonadIO m) => Connection -> m [Soreness]
