@@ -39,7 +39,7 @@ import Data.Ord (Ord ((<=)), comparing, (>), (>=))
 import Data.Semigroup (Semigroup ((<>)))
 import Data.Set qualified as Set
 import Data.String (IsString)
-import Data.Text (Text, breakOnEnd, pack, replace)
+import Data.Text (Text, breakOnEnd, intercalate, pack, replace)
 import Data.Text.Lazy qualified as TL
 import Data.Text.Read (decimal)
 import Data.Time.Clock (UTCTime (utctDay, utctDayTime), diffUTCTime, nominalDay)
@@ -261,8 +261,8 @@ inCurrentTraining :: [DBN.ExerciseWithWorkouts] -> DBN.Muscle -> Bool
 inCurrentTraining currentTraining muscle =
   isJust (find (\ewi -> muscle `Set.member` ewi.muscles) currentTraining)
 
-viewSingleExerciseInChooser :: UTCTime -> Muscle -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> DBN.ExerciseWithWorkouts -> L.Html ()
-viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessHistory exerciseWithWorkouts = do
+viewSingleExerciseInChooser :: UTCTime -> Muscle -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> [DBN.Soreness] -> DBN.ExerciseWithWorkouts -> L.Html ()
+viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessHistory currentSoreness exerciseWithWorkouts = do
   let lastExecutionOfThisExercise :: Maybe DBN.ExerciseWorkout
       lastExecutionOfThisExercise =
         maximumByMay (comparing (.time)) (Set.toList exerciseWithWorkouts.workouts)
@@ -294,6 +294,8 @@ viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessH
                   sorenessHistory
       partOfCurrentWorkout :: Bool
       partOfCurrentWorkout = any (\workout -> not workout.committed) exerciseWithWorkouts.workouts
+      soreMusclesInThisExercise :: Set.Set Muscle
+      soreMusclesInThisExercise = (foldMap (Set.singleton . (.muscle)) currentSoreness) `Set.intersection` exerciseWithWorkouts.muscles
       viewLastExecution = case lastExecutionOfThisExercise of
         Nothing -> L.p_ "Never executed!"
         Just lastExecutionInstance ->
@@ -329,6 +331,16 @@ viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessH
         L.h5_ [L.class_ "card-title"] do
           L.span_ $ L.toHtml exerciseWithWorkouts.name
         L.div_ [L.class_ "card-text"] do
+          if Set.null soreMusclesInThisExercise
+            then mempty
+            else
+              L.span_
+                [L.class_ "text-danger"]
+                ( L.toHtml
+                    ( "Contains sore muscles: "
+                        <> intercalate ", " ((.name) <$> (Set.toList soreMusclesInThisExercise))
+                    )
+                )
           if partOfCurrentWorkout
             then do
               L.p_ do
@@ -358,14 +370,14 @@ viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessH
                     iconHtml "journal-plus"
                     L.span_ "Add to workout"
 
-viewConcreteMuscleGroupExercisesOuter :: UTCTime -> [Soreness] -> [DBN.ExerciseWithWorkouts] -> Muscle -> L.Html ()
-viewConcreteMuscleGroupExercisesOuter currentTime sorenessHistory allExercises muscle =
+viewConcreteMuscleGroupExercisesOuter :: UTCTime -> [Soreness] -> [Soreness] -> [DBN.ExerciseWithWorkouts] -> Muscle -> L.Html ()
+viewConcreteMuscleGroupExercisesOuter currentTime sorenessHistory currentSoreness allExercises muscle =
   viewHtmlSkeleton
     (PageMuscle muscle)
-    (viewConcreteMuscleGroupExercises currentTime sorenessHistory allExercises muscle)
+    (viewConcreteMuscleGroupExercises currentTime sorenessHistory currentSoreness allExercises muscle)
 
-viewConcreteMuscleGroupExercises :: UTCTime -> [Soreness] -> [DBN.ExerciseWithWorkouts] -> DBN.Muscle -> L.Html ()
-viewConcreteMuscleGroupExercises currentTime sorenessHistory allExercises muscle =
+viewConcreteMuscleGroupExercises :: UTCTime -> [Soreness] -> [Soreness] -> [DBN.ExerciseWithWorkouts] -> DBN.Muscle -> L.Html ()
+viewConcreteMuscleGroupExercises currentTime sorenessHistory currentSoreness allExercises muscle =
   case filter (\m -> muscle `Set.member` m.muscles) allExercises of
     [] -> mempty
     exercisesForThisMuscle ->
@@ -395,7 +407,7 @@ viewConcreteMuscleGroupExercises currentTime sorenessHistory allExercises muscle
               L.div_ do
                 forM_ (chunksOf 2 exercisesForThisMuscle) \exerciseRow -> do
                   L.div_ [L.class_ "row"] do
-                    forM_ exerciseRow (L.div_ [L.class_ "col-lg-6 col-12"] . viewSingleExerciseInChooser currentTime muscle exercisesForThisMuscle sorenessHistory)
+                    forM_ exerciseRow (L.div_ [L.class_ "col-lg-6 col-12"] . viewSingleExerciseInChooser currentTime muscle exercisesForThisMuscle sorenessHistory currentSoreness)
 
 viewChoose :: [DBN.Muscle] -> [DBN.Soreness] -> [DBN.ExerciseWithWorkouts] -> L.Html ()
 viewChoose allMuscles' currentSoreness currentTraining = do

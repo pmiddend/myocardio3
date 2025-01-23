@@ -240,6 +240,7 @@ main = do
         allMuscles' <- retrieveAllMuscles connection
         exercises <- retrieveExercisesWithWorkouts connection Nothing
         sorenessHistory <- retrieveSorenessHistory connection
+        currentSoreness <- retrieveCurrentSoreness connection
 
         case find (\m -> m.id == muscleId) allMuscles' of
           Nothing -> do
@@ -247,7 +248,7 @@ main = do
             text ("I couldn't parse the muscle you gave me: " <> packShowLazy muscleId)
             finish
           Just muscle ->
-            html $ renderText $ viewConcreteMuscleGroupExercisesOuter currentTime sorenessHistory exercises muscle
+            html $ renderText $ viewConcreteMuscleGroupExercisesOuter currentTime sorenessHistory currentSoreness exercises muscle
 
     get "/uploaded-files/:fileid" do
       withDatabase \connection -> do
