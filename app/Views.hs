@@ -30,12 +30,12 @@ import Data.Foldable (Foldable (elem), any, find, foldMap, foldr, forM_, for_, m
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
 import Data.Int (Int, Int64)
-import Data.List (filter, zip)
+import Data.List (filter, sortOn, zip)
 import Data.List.Split (chunksOf)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, isJust, maybe)
 import Data.Monoid (Monoid (mempty))
-import Data.Ord (Ord ((<=)), comparing, (>), (>=))
+import Data.Ord (Ord ((<=)), comparing, max, min, (<), (>), (>=))
 import Data.Semigroup (Semigroup ((<>)))
 import Data.Set qualified as Set
 import Data.String (IsString)
@@ -45,15 +45,16 @@ import Data.Text.Read (decimal)
 import Data.Time.Clock (UTCTime (utctDay, utctDayTime), diffUTCTime, nominalDay)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Traversable (forM)
-import Data.Tuple (fst)
+import Data.Tuple (fst, snd)
 import Lucid qualified as L
 import Lucid.Base (makeAttributes)
 import Myocardio.DatabaseNew (ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), sorenessScalarToInt)
 import Myocardio.DatabaseNew qualified as DBN
 import Safe (maximumByMay)
 import Safe.Foldable (minimumMay)
+import Text.Printf (printf)
 import Util (packShow)
-import Prelude (Fractional ((/)), RealFrac (round), Show, succ)
+import Prelude (Double, Fractional ((/)), RealFrac (round), Show, isNaN, succ, (*))
 
 iconHtml :: Text -> L.Html ()
 iconHtml name' = L.i_ [L.class_ ("bi-" <> name' <> " me-2")] mempty
@@ -295,7 +296,7 @@ viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessH
       partOfCurrentWorkout :: Bool
       partOfCurrentWorkout = any (\workout -> not workout.committed) exerciseWithWorkouts.workouts
       soreMusclesInThisExercise :: Set.Set Muscle
-      soreMusclesInThisExercise = (foldMap (Set.singleton . (.muscle)) currentSoreness) `Set.intersection` exerciseWithWorkouts.muscles
+      soreMusclesInThisExercise = foldMap (Set.singleton . (.muscle)) currentSoreness `Set.intersection` exerciseWithWorkouts.muscles
       viewLastExecution = case lastExecutionOfThisExercise of
         Nothing -> L.p_ "Never executed!"
         Just lastExecutionInstance ->
@@ -338,7 +339,7 @@ viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessH
                 [L.class_ "text-danger"]
                 ( L.toHtml
                     ( "Contains sore muscles: "
-                        <> intercalate ", " ((.name) <$> (Set.toList soreMusclesInThisExercise))
+                        <> intercalate ", " ((.name) <$> Set.toList soreMusclesInThisExercise)
                     )
                 )
           if partOfCurrentWorkout
@@ -701,14 +702,38 @@ viewExerciseDeletion exerciseId name = viewHtmlSkeleton (PageExerciseDeletion ex
       L.input_ [L.type_ "hidden", L.name_ "sure", L.value_ "yes"]
       L.button_ [L.type_ "submit", L.class_ "btn btn-danger"] "Yes"
 
-viewStats :: Map.Map DBN.Muscle TL.Text -> L.Html ()
-viewStats muscleToSvg =
+viewStats :: [DBN.Muscle] -> Map.Map DBN.Muscle (Double, Double) -> TL.Text -> L.Html ()
+viewStats muscles muscleToRegression overall =
   viewHtmlSkeleton
     PageStats
-    ( forM_ (chunksOf 2 (Map.toList muscleToSvg)) \muscleRow -> do
-        L.div_ [L.class_ "row"] do
-          forM_ muscleRow \(muscle, svg) -> do
+    do
+      L.div_ [L.class_ "row text-center"] do
+        L.h5_ "Trends"
+        L.table_ [L.class_ "table tbl-sm"] $
+          forM_ (chunksOf 2 (sortOn (snd . snd) (Map.toList muscleToRegression))) \musclesAndRegressions -> do
+            L.tr_ do
+              forM_ musclesAndRegressions \(muscle, (_, slope)) -> do
+                L.td_ do
+                  L.span_ [L.class_ "me-2"] (L.toHtml muscle.name)
+                  let clamp v lo hi = max lo (min hi v)
+                      rotationForSlope s = (clamp (-s) (-4) 4 / 4.0) * 45.0
+                  when (not (isNaN slope)) do
+                    L.i_
+                      [ L.style_ ("transform: rotate(" <> packShow (rotationForSlope slope) <> "deg)"),
+                        L.style_ "display: inline-block",
+                        L.class_ (if slope < -0.5 then "text-danger" else "")
+                      ]
+                      "➡️"
+                  L.span_ [L.class_ "form-text"] (L.toHtml (" (" <> pack (printf "%.2f" slope) <> ")"))
+
+        L.h5_ "Overall"
+        L.toHtmlRaw overall
+      forM_ (chunksOf 2 muscles) \muscleRow -> do
+        L.div_ [L.class_ "row text-center"] do
+          forM_ muscleRow \muscle -> do
             L.div_ [L.class_ "col-lg-6 col-12"] do
               L.h5_ (L.toHtml muscle.name)
-              L.toHtmlRaw svg
-    )
+              L.p_ [L.class_ "form-text"] do
+                L.small_ do
+                  L.toHtml ("ID " <> packShow muscle.id)
+              L.img_ [L.src_ ("/stats/" <> packShow muscle.id), L.width_ "400", L.height_ "300"]

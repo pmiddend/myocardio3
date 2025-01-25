@@ -11,27 +11,28 @@ module Myocardio.DatabaseNew
     ExerciseWorkout (..),
     Muscle (..),
     retrieveMusclesWithDates,
-    MuscleWithWorkoutTime (MuscleWithWorkoutTime, muscleId, muscleName, year, week),
+    MuscleWithWorkoutWeek (MuscleWithWorkoutWeek, muscle, week),
     Soreness (..),
     sorenessScalarToInt,
     ExerciseCommitted (..),
     MuscleWithWorkout (..),
     MigrationFlags (..),
     IdType,
-    retrieveMusclesTrainedHistory,
     SorenessScalar (..),
     withDatabase,
-    retrieveLastWorkout,
     retrieveFile,
     migrateDatabase,
     openDatabase,
     closeDatabase,
     retrieveAllMuscles,
+    retrieveLastWorkout,
+    retrieveMusclesTrainedHistory,
     retrieveExercisesWithWorkouts,
     retrieveExercisesDescriptions,
     retrieveCurrentSoreness,
     retrieveSorenessHistory,
     retrieveMusclesWithLastWorkoutTime,
+    retrieveWorkoutsPerWeek,
     insertMuscle,
     insertExercise,
     updateExercise,
@@ -53,6 +54,7 @@ import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Data.Bool (Bool (False, True))
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
+import Data.Either (Either (Left, Right))
 import Data.Eq (Eq ((==)))
 import Data.Foldable (forM_, for_)
 import Data.Function (($), (.))
@@ -68,13 +70,16 @@ import Data.Semigroup ((<>))
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.String (IsString (fromString), String)
-import Data.Text (Text, pack, unpack)
+import Data.Text (Text, pack, splitOn, unpack)
+import Data.Text.Read (decimal)
 import Data.Time (UTCTime)
-import Data.Tuple (uncurry)
+import Data.Traversable (traverse)
+import Data.Tuple (fst, uncurry)
 import Database.SQLite.Simple (Connection, Only (Only, fromOnly), Query, SQLData (SQLInteger), SQLError, ToRow, changes, close, execute, execute_, lastInsertRowId, open, query, query_, withTransaction)
 import Database.SQLite.Simple.FromField (FromField (fromField), ResultError (ConversionFailed), fieldData, returnError)
 import Database.SQLite.Simple.Ok (Ok (Ok))
 import Database.SQLite.Simple.ToField (ToField (toField))
+import Myocardio.AbsoluteWeek (AbsoluteWeek, absoluteWeekFromRelative)
 import Myocardio.DatabaseOld qualified as DatabaseJson
 import Myocardio.DatabaseOld qualified as OldDb
 import Myocardio.MapUtils (insertMMap, insertMSet, multiInsertMMap)
@@ -456,6 +461,19 @@ uploadFileForExercise connection exerciseId content = liftIO do
   execute connection "INSERT INTO ExerciseHasFile (exercise_id, file_content) VALUES (?, ?)" (exerciseId, content)
   lastInsertRowId connection
 
+retrieveWorkoutsPerWeek :: forall m. (MonadIO m) => Connection -> m (Either Text [(AbsoluteWeek, Int)])
+retrieveWorkoutsPerWeek conn = liftIO do
+  results <- query_ conn "SELECT myweek, COUNT(myweek) FROM (SELECT STRFTIME('%Y-%m-%d', time) mydate, STRFTIME('%Y-%W', time) myweek FROM ExerciseWithIntensity EWI GROUP BY mydate) GROUP BY myweek" :: IO [(Text, Int)]
+  let parseWeek x = case splitOn "-" x of
+        [yearMaybe, weekMaybe] -> (,) <$> (fst <$> decimal yearMaybe) <*> (fst <$> decimal weekMaybe)
+        _ -> Left "invalid year-week string"
+      parseResultLine (myweek, count) =
+        case parseWeek myweek of
+          Left e -> Left (pack e)
+          Right (year, week) -> Right (absoluteWeekFromRelative year week, count)
+
+  pure (traverse parseResultLine results)
+
 retrieveMusclesWithLastWorkoutTime :: forall m. (MonadIO m) => Connection -> m [MuscleWithWorkout]
 retrieveMusclesWithLastWorkoutTime conn = liftIO do
   results <- query_ conn "SELECT EHM.muscle_id, Muscle.name, MAX(EWI.time) FROM ExerciseWithIntensity EWI INNER JOIN ExerciseHasMuscle EHM ON (EWI.exercise_id = EHM.exercise_id) INNER JOIN Muscle ON Muscle.id = EHM.muscle_id GROUP BY EHM.muscle_id" :: IO [(IdType, Text, UTCTime)]
@@ -531,14 +549,13 @@ retrieveLastWorkout conn = liftIO do
   results <- query_ conn (processExercisesWithWorkoutsQueryBase <> " WHERE DATE(time) IN (SELECT DATE(time) FROM ExerciseWithIntensity WHERE committed = 1 ORDER BY time DESC LIMIT 1)")
   processExercisesWithWorkouts results
 
-data MuscleWithWorkoutTime = MuscleWithWorkoutTime
-  { muscleId :: IdType,
-    muscleName :: Text,
-    year :: Int,
-    week :: Int
+data MuscleWithWorkoutWeek = MuscleWithWorkoutWeek
+  { muscle :: !Muscle,
+    week :: !AbsoluteWeek
   }
+  deriving (Show)
 
-retrieveMusclesWithDates :: forall m. (MonadIO m) => Connection -> m [MuscleWithWorkoutTime]
+retrieveMusclesWithDates :: forall m. (MonadIO m) => Connection -> m [MuscleWithWorkoutWeek]
 retrieveMusclesWithDates conn = liftIO do
-  results <- query_ conn ("SELECT EHM.muscle_id, M.name, CAST(STRFTIME('%Y', time) as INTEGER) year, CAST(STRFTIME('%W', time) AS INTEGER) week FROM ExerciseWithIntensity EWI INNER JOIN ExerciseHasMuscle EHM ON EHM.exercise_id = EWI.exercise_id INNER JOIN Muscle M ON M.id == EHM.muscle_id ORDER BY EHM.muscle_id") :: IO [(IdType, Text, Int, Int)]
-  pure ((\(muscleId, muscleName, year, week) -> MuscleWithWorkoutTime muscleId muscleName year week) <$> results)
+  results <- query_ conn "SELECT EHM.muscle_id, M.name, CAST(STRFTIME('%Y', time) as INTEGER) year, CAST(STRFTIME('%W', time) AS INTEGER) week FROM ExerciseWithIntensity EWI INNER JOIN ExerciseHasMuscle EHM ON EHM.exercise_id = EWI.exercise_id INNER JOIN Muscle M ON M.id == EHM.muscle_id ORDER BY EHM.muscle_id" :: IO [(IdType, Text, Int, Int)]
+  pure ((\(muscleId, muscleName, year, week) -> MuscleWithWorkoutWeek (Muscle muscleId muscleName) (absoluteWeekFromRelative year week)) <$> results)

@@ -32,6 +32,8 @@ library
   exposed-modules: Myocardio.DatabaseNew
                  , Myocardio.DatabaseOld
                  , Myocardio.MapUtils
+                 , Myocardio.Statistics
+                 , Myocardio.AbsoluteWeek
   build-depends:    base ^>=4.18.2.1
                   , aeson
                   , text
@@ -39,11 +41,17 @@ library
                   , xdg-basedir
                   , safe
                   , unliftio
+                  , statistics-linreg
+                  , vector
                   , directory
                   , unliftio-core
                   , containers
+                  , colour
                   , sqlite-simple
                   , bytestring
+                  , Chart
+                  , Chart-diagrams
+                  , monoidmap
   hs-source-dirs:   lib
   default-language: GHC2021
 
@@ -68,9 +76,6 @@ executable myocardio-exe
     , lucid2
     , cmark-gfm
     , http-types
-    , Chart
-    , Chart-cairo
-    , temporary
 
 test-suite myocardio-tests
   import: shared-properties, warnings
