@@ -27,6 +27,14 @@
                   {
                     scotty = haskellPackages.scotty_0_22;
                   };
+                # latest version not broken anymore
+                monoidmap = (self.callHackageDirect
+                  {
+                    pkg = "monoidmap";
+                    ver = "0.0.2.1";
+                    sha256 = "sha256-p92JdsvKHMETnlTxuB5bi2HFzkdfr2lRMOjmOtTT/rY=";
+                  }
+                  { });
               };
             };
 
