@@ -40,7 +40,6 @@ import Data.Semigroup (Semigroup ((<>)))
 import Data.Set qualified as Set
 import Data.String (IsString)
 import Data.Text (Text, breakOnEnd, intercalate, pack, replace)
-import Data.Text.Lazy qualified as TL
 import Data.Text.Read (decimal)
 import Data.Time.Clock (UTCTime (utctDay, utctDayTime), diffUTCTime, nominalDay)
 import Data.Time.Format (defaultTimeLocale, formatTime)
@@ -706,8 +705,8 @@ viewExerciseDeletion exerciseId name = viewHtmlSkeleton (PageExerciseDeletion ex
       L.input_ [L.type_ "hidden", L.name_ "sure", L.value_ "yes"]
       L.button_ [L.type_ "submit", L.class_ "btn btn-danger"] "Yes"
 
-viewStats :: [DBN.Muscle] -> Map.Map DBN.Muscle (Double, Double) -> TL.Text -> L.Html ()
-viewStats muscles muscleToRegression overall =
+viewStats :: [DBN.Muscle] -> Map.Map DBN.Muscle (Double, Double) -> L.Html ()
+viewStats muscles muscleToRegression =
   viewHtmlSkeleton
     PageStats
     do
@@ -731,7 +730,7 @@ viewStats muscles muscleToRegression overall =
                   L.span_ [L.class_ "form-text"] (L.toHtml (" (" <> pack (printf "%.2f" slope) <> ")"))
 
         L.h5_ "Overall"
-        L.toHtmlRaw overall
+        L.img_ [L.src_ "/stats/overall", L.width_ "400", L.height_ "300"]
       forM_ (chunksOf 2 muscles) \muscleRow -> do
         L.div_ [L.class_ "row text-center"] do
           forM_ muscleRow \muscle -> do

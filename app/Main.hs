@@ -34,7 +34,6 @@ import Data.Text.Read (decimal)
 import Data.Time.Clock (getCurrentTime)
 import Data.Traversable (sequence, traverse)
 import Lucid (renderText)
-import Lucid qualified as L
 import Myocardio.AbsoluteWeek (beginningOfAbsoluteWeeks, getCurrentAbsoluteWeek)
 import Myocardio.DatabaseNew
   ( ExerciseCommitted (NotCommitted),
@@ -64,7 +63,7 @@ import Myocardio.DatabaseNew
     updateSoreness,
     withDatabase,
   )
-import Myocardio.Statistics (histogramForWorkouts, regressionForWorkouts, viewSvgForWorkouts)
+import Myocardio.Statistics (histogramForWorkouts, regressionForWorkouts, viewChartForWorkouts)
 import Network.HTTP.Types.Status (status400)
 import Network.Wai.Middleware.Static (addBase, isNotAbsolute, noDots, staticPolicy)
 import Network.Wai.Parse (FileInfo (fileContent, fileName))
@@ -314,45 +313,41 @@ main = do
       withDatabase commitWorkout
       redirect "/"
 
+    get "/stats/overall" do
+      withDatabase retrieveAllMuscles >>= \case
+        [] -> html $ renderText "no muscles yet"
+        firstMuscle : _ -> do
+          currentWeek <- getCurrentAbsoluteWeek
+          workoutsPerWeek <- withDatabase retrieveWorkoutsPerWeek
+          chart <-
+            viewChartForWorkouts
+              (beginningOfAbsoluteWeeks, currentWeek)
+              ( foldMap
+                  (\(week, count) -> replicate count (MuscleWithWorkoutWeek firstMuscle week))
+                  (fromRight [] workoutsPerWeek)
+              )
+          setHeader "Content-Type" "image/png"
+          raw chart
+
     get "/stats/:muscleid" do
       muscleId <- pathParam "muscleid"
       musclesWithDate <- withDatabase retrieveMusclesWithDates
       currentWeek <- getCurrentAbsoluteWeek
-      svg <-
-        viewSvgForWorkouts
+      chart <-
+        viewChartForWorkouts
           (beginningOfAbsoluteWeeks, currentWeek)
           (filter (\mwd -> mwd.muscle.id == muscleId) musclesWithDate)
 
-      setHeader "Content-Type" "image/svg+xml"
-      html $ renderText $ L.toHtmlRaw svg
+      setHeader "Content-Type" "image/png"
+      raw chart
 
     get "/stats" do
       musclesWithDate <- withDatabase retrieveMusclesWithDates
 
       withDatabase retrieveAllMuscles >>= \case
         [] -> html $ renderText "no muscles yet"
-        allMuscles@(firstMuscle : _) -> do
+        allMuscles -> do
           currentWeek <- getCurrentAbsoluteWeek
-          workoutsPerWeek <- withDatabase retrieveWorkoutsPerWeek
-          overall <-
-            viewSvgForWorkouts
-              (beginningOfAbsoluteWeeks, currentWeek)
-              ( foldMap
-                  (\(week, count) -> replicate count (MuscleWithWorkoutWeek firstMuscle week))
-                  (fromRight [] workoutsPerWeek)
-              )
-
-          -- muscleToSvg <-
-          --   foldM
-          --     ( \prevMap newMuscle -> do
-          --         svg <-
-          --           viewSvgForWorkouts
-          --             (beginningOfAbsoluteWeeks, currentWeek)
-          --             (filter (\mwd -> mwd.muscle.id == newMuscle.id) musclesWithDate)
-          --         pure (Map.insert newMuscle svg prevMap)
-          --     )
-          --     mempty
-          --     allMuscles
 
           let regressionForMuscle muscle =
                 regressionForWorkouts
@@ -366,7 +361,6 @@ main = do
               muscleToRegression :: Map.Map Muscle (Double, Double)
               muscleToRegression = foldMap (\muscle -> Map.singleton muscle (regressionForMuscle muscle)) allMuscles
 
-          html $ renderText do
-            viewStats allMuscles muscleToRegression overall
+          html $ renderText (viewStats allMuscles muscleToRegression)
 
     middleware (staticPolicy (noDots <> isNotAbsolute <> addBase staticBasePath))
