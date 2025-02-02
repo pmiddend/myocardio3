@@ -50,7 +50,7 @@ library
                   , sqlite-simple
                   , bytestring
                   , Chart
-                  , Chart-diagrams
+                  , Chart-cairo
                   , monoidmap
   hs-source-dirs:   lib
   default-language: GHC2021
