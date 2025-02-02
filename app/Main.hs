@@ -12,7 +12,7 @@ import Control.Applicative (Applicative (pure))
 import Control.Monad (forM_, mapM_, void, (>>=))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Bifunctor (first)
-import Data.Bool (Bool (True), (&&))
+import Data.Bool (Bool (False, True), (&&))
 import Data.ByteString.Lazy qualified as BSL
 import Data.Either (fromRight)
 import Data.Eq (Eq ((/=)), (==))
@@ -116,18 +116,21 @@ finishWithBadRequest message = do
   text message
   finish
 
+mainPage :: Bool -> ActionM ()
+mainPage sorenessWasUpdated = withDatabase \connection -> do
+  allMuscles' <- retrieveAllMuscles connection
+  exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
+  currentSoreness <- retrieveCurrentSoreness connection
+  lastWorkout <- retrieveLastWorkout connection
+  currentTime <- liftIO getCurrentTime
+  musclesLastWeek <- retrieveMusclesTrainedHistory connection 7
+  html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesLastWeek sorenessWasUpdated
+
 main :: IO ()
 main = do
   scotty 3000 do
     get "/" do
-      withDatabase \connection -> do
-        allMuscles' <- retrieveAllMuscles connection
-        exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
-        currentSoreness <- retrieveCurrentSoreness connection
-        lastWorkout <- retrieveLastWorkout connection
-        currentTime <- liftIO getCurrentTime
-        musclesLastWeek <- retrieveMusclesTrainedHistory connection 7
-        html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesLastWeek
+      mainPage False
 
     get "/repeat-last" do
       withDatabase \connection -> do
@@ -143,7 +146,7 @@ main = do
         exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
         currentSoreness <- retrieveCurrentSoreness connection
         musclesLastWeek <- retrieveMusclesTrainedHistory connection 7
-        html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesLastWeek
+        html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesLastWeek False
 
     get "/exercises" do
       withDatabase \connection -> do
@@ -305,7 +308,7 @@ main = do
       currentTime <- liftIO getCurrentTime
       withDatabase \conn -> do
         mapM_ (\(muscleId, soreness) -> updateSoreness conn muscleId soreness currentTime) sorenessParams
-        redirect "/"
+      mainPage True
 
     post "/commit-workout" do
       withDatabase commitWorkout

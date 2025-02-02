@@ -594,11 +594,11 @@ viewExerciseList allMuscles' exercises existingExercise = do
       forM_ exercise'.muscles \muscle' -> L.span_ [L.class_ "badge text-bg-primary me-1"] (L.toHtml muscle'.name)
     L.div_ [L.class_ "alert alert-light"] (viewExerciseDescriptionHtml exercise')
 
-viewPageCurrentHtml :: UTCTime -> [DBN.Muscle] -> [DBN.ExerciseWithWorkouts] -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> [DBN.Muscle] -> L.Html ()
-viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesTrainedHistory = viewHtmlSkeleton PageCurrent $ do
+viewPageCurrentHtml :: UTCTime -> [DBN.Muscle] -> [DBN.ExerciseWithWorkouts] -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> [DBN.Muscle] -> Bool -> L.Html ()
+viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesTrainedHistory sorenessWasUpdated = viewHtmlSkeleton PageCurrent $ do
   viewCurrentWorkout allMuscles' exercises
   L.hr_ [L.class_ "mb-3"]
-  viewLastWorkout currentTime lastWorkout currentSoreness musclesTrainedHistory
+  viewLastWorkout currentTime lastWorkout currentSoreness musclesTrainedHistory sorenessWasUpdated
 
 htmlIdForMuscleSoreness :: Muscle -> Text
 htmlIdForMuscleSoreness muscle = "how-sore" <> packShow muscle.id
@@ -654,9 +654,9 @@ viewSorenessForm musclesInvolved currentSoreness = do
               ]
             L.label_ [L.class_ "btn btn-outline-danger", L.for_ ("verysore" <> packShow muscle'.id)] (L.toHtml $ sorenessValueToEmoji VerySore <> " VERY")
 
-viewLastWorkout :: UTCTime -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> [DBN.Muscle] -> L.Html ()
-viewLastWorkout _ [] _ _ = mempty
-viewLastWorkout currentTime exercises@(e : _) currentSoreness musclesTrainedHistory = case Set.elems e.workouts of
+viewLastWorkout :: UTCTime -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> [DBN.Muscle] -> Bool -> L.Html ()
+viewLastWorkout _ [] _ _ _ = mempty
+viewLastWorkout currentTime exercises@(e : _) currentSoreness musclesTrainedHistory sorenessWasUpdated = case Set.elems e.workouts of
   [] -> mempty
   (workout : _) -> do
     L.h4_ do
@@ -675,7 +675,11 @@ viewLastWorkout currentTime exercises@(e : _) currentSoreness musclesTrainedHist
           L.span_ [L.class_ "text-muted me-1"] "Historical: "
           viewSorenessForm musclesRemaining currentSoreness
 
-        L.button_ [L.class_ "btn btn-primary mt-3", L.type_ "submit"] "💪 Update soreness"
+        L.div_ do
+          L.button_ [L.class_ "btn btn-primary mt-3", L.type_ "submit"] "💪 Update soreness"
+
+        when sorenessWasUpdated do
+          L.div_ [L.class_ "badge text-bg-success"] "Soreness updated!"
 
       L.div_ [L.class_ "gap-1 mb-3"] do
         L.span_ [L.class_ "text-muted me-1"] "Exercises: "
