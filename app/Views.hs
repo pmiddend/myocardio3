@@ -303,7 +303,7 @@ viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessH
             L.span_ $ L.toHtml $ "Last: " <> dayDiffText currentTime lastExecutionInstance.time
             L.br_ []
             case maximumByMay (comparing (.soreness)) sorenessValuesInbetweenWorkouts of
-              Nothing -> L.span_ [L.class_ "text-danger"] "Soreness unresolved!"
+              Nothing -> L.span_ [L.class_ "text-success"] $ L.toHtml $ "Soreness (not set): " <> sorenessValueToEmoji DBN.NotSore
               Just lastSoreness ->
                 if lastSoreness.soreness == DBN.NotSore
                   then L.span_ [L.class_ "text-success"] $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji lastSoreness.soreness
