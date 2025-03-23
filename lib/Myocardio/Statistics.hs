@@ -3,7 +3,6 @@ module Myocardio.Statistics (viewChartForWorkouts, weekToCountMap, histogramForW
 import Control.Applicative (pure)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Bifunctor (second)
-import Data.Bool ((&&))
 import Data.ByteString.Lazy qualified as BSL
 import Data.Colour.SRGB (sRGB24read)
 import Data.Eq ((/=))
@@ -16,7 +15,6 @@ import Data.List.NonEmpty qualified as NE
 import Data.Maybe (Maybe (Just, Nothing))
 import Data.Monoid (Sum (Sum, getSum), mempty, (<>))
 import Data.MonoidMap qualified as MonoidMap
-import Data.Ord ((<))
 import Data.Tuple (fst, snd)
 import Data.Vector.Unboxed qualified as V
 import Graphics.Rendering.Chart (laxis_generate, layout_y_axis, makeAxis, plotBars)
@@ -69,9 +67,8 @@ viewChartForWorkouts range musclesWithDate =
 
 regressionForWorkouts :: [(AbsoluteWeek, Int)] -> (Double, Double)
 regressionForWorkouts musclesWithDate =
-  let -- lastWeeks = reverse (take 8 (reverse musclesWithDate))
-      lastWeeks = musclesWithDate
-      input = filter (\(week, count) -> count /= 0 && absoluteWeekToInt week < 55) lastWeeks
+  let lastWeeks = musclesWithDate
+      input = filter (\(_week, count) -> count /= 0) lastWeeks
    in LR.linearRegression
         (V.fromList ((\(_, count) -> fromIntegral count) <$> input))
         (V.fromList ((\(w, _) -> fromIntegral (absoluteWeekToInt w)) <$> input))
