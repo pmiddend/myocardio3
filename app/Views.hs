@@ -611,11 +611,10 @@ muscleIdForMuscleSorenessFromHtml x =
         Right (muscleId, _remainder) -> Just muscleId
     _ -> Nothing
 
-viewSorenessForm :: (Foldable f) => f DBN.Muscle -> [DBN.Soreness] -> L.Html ()
-viewSorenessForm musclesInvolved currentSoreness = do
-  L.table_ do
-    L.tbody_ do
-      forM_ musclesInvolved \muscle' -> L.tr_ do
+viewSorenessForm :: Set.Set DBN.Muscle -> Set.Set DBN.Muscle -> [DBN.Soreness] -> L.Html ()
+viewSorenessForm musclesInvolved historical currentSoreness = do
+  let makeRow :: DBN.Muscle -> L.Html ()
+      makeRow muscle' = L.tr_ do
         L.td_ (L.toHtml muscle'.name)
         L.td_ do
           L.div_ [L.class_ "btn-group"] do
@@ -652,6 +651,17 @@ viewSorenessForm musclesInvolved currentSoreness = do
                   else mempty
               ]
             L.label_ [L.class_ "btn btn-outline-danger", L.for_ ("verysore" <> packShow muscle'.id)] (L.toHtml $ sorenessValueToEmoji VerySore <> " VERY")
+  L.table_ do
+    L.tbody_ do
+      L.tr_ do
+        L.td_ [L.colspan_ "2"] do
+          L.span_ [L.class_ "text-muted me-1"] "Trained: "
+      forM_ (sortOn (.name) (Set.toList musclesInvolved)) makeRow
+      when (not (Set.null historical)) do
+        L.tr_ do
+          L.td_ [L.colspan_ "2"] do
+            L.span_ [L.class_ "text-muted me-1"] "Historical: "
+        forM_ (sortOn (.name) (Set.toList historical)) makeRow
 
 viewLastWorkout :: UTCTime -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> [DBN.Muscle] -> Bool -> L.Html ()
 viewLastWorkout _ [] _ _ _ = mempty
@@ -663,17 +673,11 @@ viewLastWorkout currentTime exercises@(e : _) currentSoreness musclesTrainedHist
       L.em_ (L.toHtml (dayDiffText currentTime workout.time))
     L.form_ [L.action_ "/update-soreness", L.method_ "post"] do
       L.div_ [L.class_ "gap-1 mb-3"] do
-        L.span_ [L.class_ "text-muted me-1"] "Trained: "
         let musclesInLastWorkout = foldMap (.muscles) exercises
             historicalMusclesOrSore =
               Set.fromList musclesTrainedHistory
                 <> foldr (Set.insert . (.muscle)) mempty currentSoreness
-        viewSorenessForm musclesInLastWorkout currentSoreness
-        let musclesRemaining = historicalMusclesOrSore `Set.difference` musclesInLastWorkout
-        when (not (Set.null musclesRemaining)) do
-          L.span_ [L.class_ "text-muted me-1"] "Historical: "
-          viewSorenessForm musclesRemaining currentSoreness
-
+        viewSorenessForm musclesInLastWorkout (historicalMusclesOrSore `Set.difference` musclesInLastWorkout) currentSoreness
         L.div_ do
           L.button_ [L.class_ "btn btn-primary mt-3", L.type_ "submit"] "💪 Update soreness"
 
