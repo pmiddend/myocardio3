@@ -6,14 +6,14 @@ import Data.Bifunctor (second)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Colour.SRGB (sRGB24read)
 import Data.Eq ((/=))
-import Data.Foldable (Foldable, foldMap)
+import Data.Foldable (Foldable, foldr)
 import Data.Function (($), (&), (.))
 import Data.Functor (fmap, (<$>))
 import Data.Int (Int)
 import Data.List (filter)
 import Data.List.NonEmpty qualified as NE
 import Data.Maybe (Maybe (Just, Nothing))
-import Data.Monoid (Sum (Sum, getSum), mempty, (<>))
+import Data.Monoid (Sum (getSum), mempty, (<>))
 import Data.MonoidMap qualified as MonoidMap
 import Data.Tuple (fst, snd)
 import Data.Vector.Unboxed qualified as V
@@ -29,7 +29,7 @@ import UnliftIO (withSystemTempDirectory)
 import Prelude (Double, fromIntegral, (+), (-))
 
 weekToCountMap :: (Foldable f) => f AbsoluteWeek -> MonoidMap.MonoidMap AbsoluteWeek (Sum Int)
-weekToCountMap = foldMap (`MonoidMap.singleton` Sum 1)
+weekToCountMap = foldr (MonoidMap.adjust (+ 1)) mempty
 
 toExtendedList :: (AbsoluteWeek, AbsoluteWeek) -> MonoidMap.MonoidMap AbsoluteWeek (Sum Int) -> [(AbsoluteWeek, Int)]
 toExtendedList (fromWeek, toWeek) l =
