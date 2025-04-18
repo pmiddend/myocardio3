@@ -8,7 +8,7 @@
 TODO
 ** Programming Principles
 
-*No Javascript*: We provide a web server that speaks HTML/CSS, but there will be no Javascript involved.
+*No Javascript necessary*: We provide a web server that speaks HTML/CSS, but there will be no Javascript needed to use the site.
 
 *Text browser compatible*: We'll regularly try out the output with a text browser such as emacs' eww or links.
 
