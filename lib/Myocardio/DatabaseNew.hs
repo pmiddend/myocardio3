@@ -72,7 +72,7 @@ import Data.Set qualified as Set
 import Data.String (IsString (fromString), String)
 import Data.Text (Text, pack, splitOn, unpack)
 import Data.Text.Read (decimal)
-import Data.Time (UTCTime)
+import Data.Time (Day, UTCTime (UTCTime), secondsToDiffTime)
 import Data.Traversable (traverse)
 import Data.Tuple (fst, uncurry)
 import Database.SQLite.Simple (Connection, Only (Only, fromOnly), Query, SQLData (SQLInteger), SQLError, ToRow, changes, close, execute, execute_, lastInsertRowId, open, query, query_, withTransaction)
@@ -88,7 +88,7 @@ import System.Environment.XDG.BaseDir (getUserConfigDir, getUserDataDir)
 import System.IO (FilePath, IO)
 import Text.Show (Show, show)
 import UnliftIO.Exception (bracket)
-import Prelude (Num, error)
+import Prelude (Num, error, (*))
 
 type IdType = Int64
 
@@ -540,9 +540,15 @@ updateSoreness :: forall m. (MonadIO m) => Connection -> IdType -> SorenessScala
 updateSoreness conn muscleId soreness currentTime = liftIO do
   execute conn "INSERT INTO Soreness (muscle_id, soreness, time) VALUES (?, ?, ?)" (muscleId, soreness, currentTime)
 
-commitWorkout :: forall m. (MonadIO m) => Connection -> m ()
-commitWorkout conn = liftIO do
-  execute conn "UPDATE ExerciseWithIntensity SET committed = ?" (Only (1 :: Int))
+commitWorkout :: forall m. (MonadIO m) => Maybe Day -> Connection -> m ()
+commitWorkout workoutDate conn = liftIO do
+  case workoutDate of
+    Nothing -> execute conn "UPDATE ExerciseWithIntensity SET committed = ?" (Only (1 :: Int))
+    Just realWorkoutDate ->
+      execute
+        conn
+        "UPDATE ExerciseWithIntensity SET committed = ?, time = ? WHERE committed = 0"
+        (1 :: Int, UTCTime realWorkoutDate (secondsToDiffTime (4 * 60 * 60)))
 
 retrieveLastWorkout :: forall m. (MonadIO m) => Connection -> m [ExerciseWithWorkouts]
 retrieveLastWorkout conn = liftIO do
