@@ -26,11 +26,12 @@ import Control.Monad (unless, void, when, (>>=))
 import Data.Bool (Bool (True), not, otherwise, (&&))
 import Data.Either (Either (Left, Right))
 import Data.Eq (Eq, (/=), (==))
-import Data.Foldable (Foldable (elem), any, find, foldMap, foldr, forM_, for_, mapM_)
+import Data.Foldable (Foldable (elem), any, find, foldMap, foldr, forM_, for_, mapM_, maximumBy)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
 import Data.Int (Int, Int64)
-import Data.List (filter, sortOn, zip)
+import Data.List (filter, sortOn, unfoldr, zip)
+import Data.List.NonEmpty qualified as NE
 import Data.List.Split (chunksOf)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, isJust, maybe)
@@ -196,11 +197,9 @@ viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
   L.div_ [L.class_ "card-body"] do
     L.h5_ [L.class_ "card-title"] do
       L.strong_ (L.toHtml exWithIn.name)
-    L.h6_ [L.class_ "card-subtitle"] do
-      for_ (Set.lookupMin exWithIn.workouts) \(ExerciseWorkout {intensity}) -> do
-        L.toHtml ("Intensity: " :: Text)
-        L.span_ [L.id_ (packShow exWithIn.id <> "-previous")] do
-          L.strong_ (L.toHtml intensity)
+    L.div_ [L.class_ "gap-1 mb-3"] do
+      L.span_ [L.class_ "text-muted me-1"] "Trained: "
+      forM_ exWithIn.muscles \muscle' -> L.span_ [L.class_ "badge text-bg-secondary me-1"] (L.toHtml muscle'.name)
     L.p_ [L.class_ "card-text text-info"] do
       L.toHtmlRaw $ commonmarkToHtml [] [] exWithIn.description
       L.form_ [L.action_ "/toggle-exercise-in-workout", L.method_ "post"] do
@@ -209,11 +208,16 @@ viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
         L.input_ [L.type_ "hidden", L.name_ "exercise-id", L.value_ (packShow exWithIn.id)]
         L.button_
           [ L.type_ "submit",
-            L.class_ "btn btn-secondary"
+            L.class_ "btn btn-secondary btn-sm mb-2"
           ]
           do
             iconHtml "trash"
             L.span_ "Remove from workout"
+      L.h6_ [L.class_ "card-subtitle"] do
+        for_ (Set.lookupMin exWithIn.workouts) \(ExerciseWorkout {intensity}) -> do
+          L.toHtml ("Intensity: " :: Text)
+          L.span_ [L.id_ (packShow exWithIn.id <> "-previous")] do
+            L.strong_ (L.toHtml intensity)
       L.form_ [L.action_ "/change-intensity", L.method_ "post"] do
         L.input_ [L.type_ "hidden", L.name_ "exercise-id", L.value_ (packShow exWithIn.id)]
         for_ (Set.lookupMin exWithIn.workouts) \(ExerciseWorkout {intensity}) ->
@@ -234,13 +238,52 @@ viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
         L.div_ [L.id_ (packShow exWithIn.id <> "-appendix")] mempty
         L.script_ ("write_appendix(\"" <> packShow exWithIn.id <> "\")")
 
+data ExerciseSortingState = ExerciseSortingState
+  { previousExercise :: Maybe DBN.ExerciseWithWorkouts,
+    remainingExercises :: [DBN.ExerciseWithWorkouts]
+  }
+
 viewCurrentWorkout :: [DBN.Muscle] -> [DBN.ExerciseWithWorkouts] -> L.Html ()
 viewCurrentWorkout allMuscles' exercises =
   L.div_ [makeId idCurrentWorkout] do
     case exercises of
       [] -> mempty
       currentExercises -> do
-        let musclesInvolved :: Set.Set Muscle
+        let unfolder :: ExerciseSortingState -> Maybe (DBN.ExerciseWithWorkouts, ExerciseSortingState)
+            unfolder (ExerciseSortingState {previousExercise, remainingExercises}) =
+              case NE.nonEmpty remainingExercises of
+                Nothing -> Nothing
+                Just nonEmptyRemaining ->
+                  case previousExercise of
+                    Nothing ->
+                      let chosenExercise =
+                            maximumBy (comparing (Set.size . (.muscles))) nonEmptyRemaining
+                       in Just
+                            ( chosenExercise,
+                              ExerciseSortingState
+                                { previousExercise = Just chosenExercise,
+                                  remainingExercises = filter (\e -> e.id /= chosenExercise.id) remainingExercises
+                                }
+                            )
+                    Just previousExercise' ->
+                      let chosenExercise =
+                            maximumBy
+                              ( comparing
+                                  (\e -> Set.size (e.muscles `Set.difference` previousExercise'.muscles))
+                              )
+                              nonEmptyRemaining
+                       in Just
+                            ( chosenExercise,
+                              ExerciseSortingState
+                                { previousExercise = Just chosenExercise,
+                                  remainingExercises = filter (\e -> e.id /= chosenExercise.id) remainingExercises
+                                }
+                            )
+            currentExercisesSorted =
+              unfoldr
+                unfolder
+                (ExerciseSortingState {previousExercise = Nothing, remainingExercises = currentExercises})
+            musclesInvolved :: Set.Set Muscle
             musclesInvolved = foldMap (\e -> e.muscles) currentExercises
             musclesMissing :: Set.Set Muscle
             musclesMissing = Set.fromList allMuscles' `Set.difference` musclesInvolved
@@ -250,7 +293,7 @@ viewCurrentWorkout allMuscles' exercises =
         L.div_ [L.class_ "gap-1 mb-3"] do
           L.span_ [L.class_ "text-muted me-1"] "Missing: "
           forM_ musclesMissing \muscle' -> L.span_ [L.class_ "badge text-bg-warning me-1"] (L.toHtml muscle'.name)
-        forM_ (chunksOf 2 currentExercises) \exerciseRow -> do
+        forM_ (chunksOf 2 currentExercisesSorted) \exerciseRow -> do
           L.div_ [L.class_ "row"] do
             forM_ exerciseRow (L.div_ [L.class_ "col-lg-6 col-12"] . viewSingleExerciseInCurrentWorkout)
 
