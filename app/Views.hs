@@ -298,13 +298,15 @@ viewCurrentWorkout allMuscles' exercises =
             forM_ exerciseRow (L.div_ [L.class_ "col-lg-6 col-12"] . viewSingleExerciseInCurrentWorkout)
 
         L.form_ [L.action_ "/commit-workout", L.method_ "post"] do
-          L.button_
-            [ L.type_ "submit",
-              L.class_ "btn btn-success"
-            ]
-            do
-              iconHtml "send"
-              L.span_ "Commit workout"
+          L.div_ [L.class_ "hstack gap-3"] do
+            L.button_
+              [ L.type_ "submit",
+                L.class_ "btn btn-success text-nowrap"
+              ]
+              do
+                iconHtml "send"
+                L.span_ "Commit workout"
+            L.input_ [L.type_ "date", L.name_ "workout-date", L.class_ "form-control"]
 
 inCurrentTraining :: [DBN.ExerciseWithWorkouts] -> DBN.Muscle -> Bool
 inCurrentTraining currentTraining muscle =

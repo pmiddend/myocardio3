@@ -98,7 +98,7 @@ unitTests =
             Set.size ex1WithWorkouts.workouts @?= 1
 
         step "committing"
-        commitWorkout conn
+        commitWorkout Nothing conn
 
         step "retrieving last workout"
         lastWorkoutExercises <- retrieveLastWorkout conn

@@ -31,7 +31,9 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text.Lazy qualified as TL
 import Data.Text.Read (decimal)
+import Data.Time (Day)
 import Data.Time.Clock (getCurrentTime)
+import Data.Time.Format.ISO8601 (iso8601ParseM)
 import Data.Traversable (sequence, traverse)
 import Lucid (renderText)
 import Myocardio.AbsoluteWeek (beginningOfAbsoluteWeeks, getCurrentAbsoluteWeek)
@@ -74,6 +76,12 @@ import Views (exerciseFormDescriptionParam, exerciseFormFilesToDeleteParam, exer
 import Web.Scotty (ActionM, Parsable (parseParam, parseParamList), capture, files, finish, formParam, formParamMaybe, formParams, get, html, pathParam, post, queryParamMaybe, raw, redirect, scotty, setHeader, status, text)
 import Web.Scotty.Trans (middleware)
 import Prelude (Double, Either (Left, Right), (-))
+
+instance Parsable Day where
+  parseParam v =
+    case iso8601ParseM (TL.unpack v) of
+      Nothing -> Left ("cannot parse form date parameter " <> v)
+      Just day -> Right day
 
 instance (Parsable a) => Parsable (NE.NonEmpty a) where
   parseParam v =
@@ -310,7 +318,8 @@ main = do
       mainPage True
 
     post "/commit-workout" do
-      withDatabase commitWorkout
+      workoutDate <- formParamMaybe "workout-date"
+      withDatabase (commitWorkout workoutDate)
       redirect "/"
 
     get "/stats/overall" do
