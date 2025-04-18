@@ -126,6 +126,7 @@ viewHtmlSkeleton page content = do
       L.link_ [L.href_ "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css", L.rel_ "stylesheet"]
       L.link_ [L.href_ "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css", L.rel_ "stylesheet"]
     L.body_ $ do
+      L.script_ [L.src_ "/myocardio.js"] ("" :: Text)
       viewHeader page
       L.div_ [L.class_ "container"] do
         L.main_ do
@@ -196,8 +197,10 @@ viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
     L.h5_ [L.class_ "card-title"] do
       L.strong_ (L.toHtml exWithIn.name)
     L.h6_ [L.class_ "card-subtitle"] do
-      for_ (Set.lookupMin exWithIn.workouts) \(ExerciseWorkout {intensity}) ->
-        "Intensity: " <> L.strong_ (L.toHtml intensity)
+      for_ (Set.lookupMin exWithIn.workouts) \(ExerciseWorkout {intensity}) -> do
+        L.toHtml ("Intensity: " :: Text)
+        L.span_ [L.id_ (packShow exWithIn.id <> "-previous")] do
+          L.strong_ (L.toHtml intensity)
     L.p_ [L.class_ "card-text text-info"] do
       L.toHtmlRaw $ commonmarkToHtml [] [] exWithIn.description
       L.form_ [L.action_ "/toggle-exercise-in-workout", L.method_ "post"] do
@@ -206,7 +209,7 @@ viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
         L.input_ [L.type_ "hidden", L.name_ "exercise-id", L.value_ (packShow exWithIn.id)]
         L.button_
           [ L.type_ "submit",
-            L.class_ "btn btn-secondary btn-sm"
+            L.class_ "btn btn-secondary"
           ]
           do
             iconHtml "trash"
@@ -215,18 +218,21 @@ viewSingleExerciseInCurrentWorkout exWithIn = L.div_ [L.class_ "mb-3 card"] do
         L.input_ [L.type_ "hidden", L.name_ "exercise-id", L.value_ (packShow exWithIn.id)]
         for_ (Set.lookupMin exWithIn.workouts) \(ExerciseWorkout {intensity}) ->
           L.input_
-            [ L.class_ "form-control form-control-sm mb-1",
+            [ L.class_ "form-control mb-1",
               L.value_ intensity,
               L.name_ "intensity",
-              L.type_ "text"
+              L.type_ "text",
+              L.id_ (packShow exWithIn.id <> "-input")
             ]
         L.button_
           [ L.type_ "submit",
-            L.class_ "btn btn-sm btn-primary"
+            L.class_ "btn btn-primary mb-2"
           ]
           do
             iconHtml "send"
             L.span_ "Change intensity"
+        L.div_ [L.id_ (packShow exWithIn.id <> "-appendix")] mempty
+        L.script_ ("write_appendix(\"" <> packShow exWithIn.id <> "\")")
 
 viewCurrentWorkout :: [DBN.Muscle] -> [DBN.ExerciseWithWorkouts] -> L.Html ()
 viewCurrentWorkout allMuscles' exercises =
@@ -346,7 +352,7 @@ viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessH
               L.p_ do
                 L.em_ "in current workout"
               L.button_
-                [ L.class_ "btn btn-secondary btn-sm",
+                [ L.class_ "btn btn-secondary",
                   L.type_ "submit"
                 ]
                 do
