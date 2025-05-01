@@ -284,11 +284,16 @@ migrateDatabase connection flags = do
   case version of
     Nothing ->
       case flags of
-        MigrateFromJson -> migrateFromJson connection
-        NoJson -> pure ()
+        MigrateFromJson -> do
+          migrateFromJson connection
+          migrateDatabase connection flags
+        NoJson -> do
+          liftIO (execute connection "INSERT INTO Version (version) VALUES (?)" (Only (1 :: Int)))
+          migrateDatabase connection flags
     Just 1 -> do
       liftIO $ execute_ connection "ALTER TABLE Exercise ADD COLUMN deprecated INTEGER NOT NULL DEFAULT 0"
       liftIO $ execute_ connection "UPDATE Version SET version = 2"
+      migrateDatabase connection flags
     Just 2 -> pure ()
     Just v -> error $ "invalid version stored in DB: expected none, 1 or 2, got " <> show v
 
