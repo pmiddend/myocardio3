@@ -347,6 +347,17 @@ viewSingleExerciseInChooser currentTime muscle exercisesForThisMuscle sorenessHi
       partOfCurrentWorkout = any (\workout -> not workout.committed) exerciseWithWorkouts.workouts
       soreMusclesInThisExercise :: Set.Set Muscle
       soreMusclesInThisExercise = foldMap (Set.singleton . (.muscle)) currentSoreness `Set.intersection` exerciseWithWorkouts.muscles
+      viewAllExecutionsTable = do
+        L.table_ [L.class_ "table table-sm"] do
+          L.thead_ do
+            L.tr_ do
+              L.th_ "When"
+              L.th_ "Comment"
+          L.tbody_ do
+            forM_ exerciseWithWorkouts.workouts \workout ->
+              L.tr_ do
+                L.td_ [L.class_ "text-nowrap"] $ L.toHtml $ pack $ formatTime defaultTimeLocale "%F" workout.time
+                L.td_ (L.toHtml workout.intensity)
       viewLastExecution = case lastExecutionOfThisExercise of
         Nothing -> L.p_ "Never executed!"
         Just lastExecutionInstance ->
@@ -360,16 +371,7 @@ viewSingleExerciseInChooser currentTime muscle exercisesForThisMuscle sorenessHi
                   then L.span_ [L.class_ "text-success"] $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji lastSoreness.soreness
                   else L.span_ $ L.toHtml $ "Soreness: " <> sorenessValueToEmoji lastSoreness.soreness
             L.br_ []
-            L.table_ [L.class_ "table table-sm"] do
-              L.thead_ do
-                L.tr_ do
-                  L.th_ "When"
-                  L.th_ "Comment"
-              L.tbody_ do
-                forM_ exerciseWithWorkouts.workouts \workout ->
-                  L.tr_ do
-                    L.td_ [L.class_ "text-nowrap"] $ L.toHtml $ pack $ formatTime defaultTimeLocale "%F" workout.time
-                    L.td_ (L.toHtml workout.intensity)
+            viewAllExecutionsTable
   L.form_ [L.method_ "post", L.action_ "/toggle-exercise-in-workout"] do
     L.input_
       [ L.type_ "hidden",
@@ -399,6 +401,7 @@ viewSingleExerciseInChooser currentTime muscle exercisesForThisMuscle sorenessHi
                 )
           if partOfCurrentWorkout
             then do
+              viewAllExecutionsTable
               L.p_ do
                 L.em_ "in current workout"
               L.button_
