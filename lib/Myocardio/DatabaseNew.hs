@@ -11,15 +11,17 @@ module Myocardio.DatabaseNew
     ExerciseWorkout (..),
     Muscle (..),
     ExerciseToggleState (..),
-    retrieveMusclesWithDates,
     MuscleWithWorkoutWeek (MuscleWithWorkoutWeek, muscle, week),
     Soreness (..),
-    sorenessScalarToInt,
     ExerciseCommitted (..),
     MuscleWithWorkout (..),
     MigrationFlags (..),
     IdType,
     SorenessScalar (..),
+    DeprecationStatus (..),
+    retrieveMusclesWithDates,
+    sorenessScalarToInt,
+    setDeprecation,
     withDatabase,
     retrieveFile,
     migrateDatabase,
@@ -162,12 +164,26 @@ data Soreness = Soreness
   }
   deriving (Show)
 
+data DeprecationStatus = Deprecated | NotDeprecated deriving (Eq, Show, Ord)
+
+instance FromField DeprecationStatus where
+  fromField f =
+    case fieldData f of
+      SQLInteger 0 -> Ok NotDeprecated
+      SQLInteger 1 -> Ok Deprecated
+      _ -> returnError ConversionFailed f "bool must be 0 or 1"
+
+instance ToField DeprecationStatus where
+  toField NotDeprecated = SQLInteger 0
+  toField Deprecated = SQLInteger 1
+
 data ExerciseDescription = ExerciseDescription
   { id :: !IdType,
     muscles :: !(Set.Set Muscle),
     description :: !Text,
     name :: !Text,
-    fileIds :: !(Set IdType)
+    fileIds :: !(Set IdType),
+    deprecated :: !DeprecationStatus
   }
   deriving (Show)
 
@@ -270,8 +286,11 @@ migrateDatabase connection flags = do
       case flags of
         MigrateFromJson -> migrateFromJson connection
         NoJson -> pure ()
-    Just 1 -> pure ()
-    Just v -> error $ "invalid version stored in DB: expected 1, got " <> show v
+    Just 1 -> do
+      liftIO $ execute_ connection "ALTER TABLE Exercise ADD COLUMN deprecated INTEGER NOT NULL DEFAULT 0"
+      liftIO $ execute_ connection "UPDATE Version SET version = 2"
+    Just 2 -> pure ()
+    Just v -> error $ "invalid version stored in DB: expected none, 1 or 2, got " <> show v
 
 -- | sqlite-simple does provide withConnection, but it's only in IO, and because of scotty, we need it in a more arbitrary monad
 withConnection :: (MonadUnliftIO m) => String -> (Connection -> m a) -> m a
@@ -396,16 +415,27 @@ processExercisesWithWorkouts results = do
         <$> Set.toList exerciseData
     )
 
-retrieveExercisesWithWorkouts :: forall m. (MonadIO m) => Connection -> Maybe ExerciseCommitted -> m [ExerciseWithWorkouts]
-retrieveExercisesWithWorkouts conn committedFilterMaybe = liftIO $ do
+retrieveExercisesWithWorkouts :: forall m. (MonadIO m) => Connection -> Maybe ExerciseCommitted -> Maybe DeprecationStatus -> m [ExerciseWithWorkouts]
+retrieveExercisesWithWorkouts conn committedFilterMaybe deprecationStatus = liftIO $ do
   let finalStatement :: IO [(IdType, Text, Text, Maybe IdType, Maybe Text, Maybe IdType, Maybe Text, Maybe UTCTime, Maybe Int)]
-      finalStatement = case committedFilterMaybe of
-        Nothing -> query_ conn processExercisesWithWorkoutsQueryBase
-        Just committedFilter ->
-          query
-            conn
-            (processExercisesWithWorkoutsQueryBase <> " WHERE WI.committed = ?")
-            (Only @Int (case committedFilter of Committed -> 1; NotCommitted -> 0))
+      finalStatement =
+        case (committedFilterMaybe, deprecationStatus) of
+          (Nothing, Nothing) -> query_ conn processExercisesWithWorkoutsQueryBase
+          (Just committedFilter, Nothing) ->
+            query
+              conn
+              (processExercisesWithWorkoutsQueryBase <> " WHERE WI.committed = ?")
+              (Only @Int (case committedFilter of Committed -> 1; NotCommitted -> 0))
+          (Nothing, Just deprecationFilter) ->
+            query
+              conn
+              (processExercisesWithWorkoutsQueryBase <> " WHERE E.deprecated = ?")
+              (Only @Int (case deprecationFilter of Deprecated -> 1; NotDeprecated -> 0))
+          (Just committedFilter, Just deprecationFilter) ->
+            query
+              conn
+              (processExercisesWithWorkoutsQueryBase <> " WHERE E.deprecated = ? AND WI.committed = ?")
+              ((case deprecationFilter of Deprecated -> 1; NotDeprecated -> 0, case committedFilter of Committed -> 1; NotCommitted -> 0) :: (Int, Int))
   results <- finalStatement
   processExercisesWithWorkouts results
 
@@ -419,19 +449,19 @@ retrieveExercisesDescriptions conn = liftIO do
   results <-
     query_
       conn
-      "SELECT E.id, E.description, E.name, M.id muscle_id, M.name muscle_name, F.id file_id \
+      "SELECT E.id, E.description, E.name, E.deprecated, M.id muscle_id, M.name muscle_name, F.id file_id \
       \  FROM Exercise as E \
       \  LEFT JOIN ExerciseHasMuscle ON E.id = ExerciseHasMuscle.exercise_id \
       \  LEFT JOIN Muscle M ON M.id = ExerciseHasMuscle.muscle_id \
       \  LEFT JOIN ExerciseHasFile F ON E.id = F.exercise_id \
       \  ORDER BY E.name ASC" ::
-      IO [(IdType, Text, Text, Maybe IdType, Maybe Text, Maybe IdType)]
+      IO [(IdType, Text, Text, DeprecationStatus, Maybe IdType, Maybe Text, Maybe IdType)]
 
   exerciseDataRef <- newIORef mempty
   exerciseMusclesByIdRef <- newIORef mempty
   exerciseFilesByIdRef <- newIORef mempty
-  forM_ results \(exId, exDescription, exName, muId, muName, fileId) -> do
-    insertMSet exerciseDataRef (exId, exDescription, exName)
+  forM_ results \(exId, exDescription, exName, exDeprecated, muId, muName, fileId) -> do
+    insertMSet exerciseDataRef (exId, exDescription, exName, exDeprecated)
 
     for_ ((,) <$> muId <*> muName) (multiInsertMMap exerciseMusclesByIdRef exId . uncurry Muscle)
     for_ fileId (multiInsertMMap exerciseFilesByIdRef exId)
@@ -441,11 +471,12 @@ retrieveExercisesDescriptions conn = liftIO do
   exerciseFilesById <- readIORef exerciseFilesByIdRef
 
   pure
-    ( ( \(exId, exDescription, exName) ->
+    ( ( \(exId, exDescription, exName, exDeprecated) ->
           ExerciseDescription
             { id = exId,
               description = exDescription,
               name = exName,
+              deprecated = exDeprecated,
               muscles = fromMaybe mempty (Map.lookup exId exerciseMusclesById),
               fileIds = fromMaybe mempty (Map.lookup exId exerciseFilesById)
             }
@@ -488,6 +519,10 @@ retrieveMusclesWithLastWorkoutTime conn = liftIO do
       )
         <$> results
     )
+
+setDeprecation :: forall m. (MonadIO m) => Connection -> IdType -> DeprecationStatus -> m ()
+setDeprecation conn exerciseId deprecation = liftIO do
+  execute conn "UPDATE Exercise SET deprecated = ? WHERE id = ?" (deprecation, exerciseId)
 
 removeExercise :: forall m. (MonadIO m) => Connection -> IdType -> m ()
 removeExercise conn exerciseId = liftIO do

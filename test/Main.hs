@@ -38,7 +38,7 @@ unitTests =
   testGroup
     "Unit tests"
     [ testCaseSteps "create DB, should be empty" \_step -> withTemporaryDb \conn -> do
-        exercisesWithWorkouts <- retrieveExercisesWithWorkouts conn Nothing
+        exercisesWithWorkouts <- retrieveExercisesWithWorkouts conn Nothing Nothing
         length exercisesWithWorkouts @?= 0,
       testCaseSteps "create muscles, add soreness and retrieve" $ \step -> withTemporaryDb \conn -> do
         step "Creating muscles"
@@ -83,14 +83,14 @@ unitTests =
         exercises <- retrieveExercisesDescriptions conn
         length exercises @?= 3
 
-        exercisesAndWorkouts <- retrieveExercisesWithWorkouts conn Nothing
+        exercisesAndWorkouts <- retrieveExercisesWithWorkouts conn Nothing Nothing
         length exercisesAndWorkouts @?= 3
 
         step "Adding to workout"
         currentTime <- getCurrentTime
 
         toggleExercise conn ex1 currentTime "intense!"
-        exercisesAndWorkouts' <- retrieveExercisesWithWorkouts conn Nothing
+        exercisesAndWorkouts' <- retrieveExercisesWithWorkouts conn Nothing Nothing
 
         case find (\eaw -> eaw.id == ex1) exercisesAndWorkouts' of
           Nothing -> assertFailure "couldn't find ex1 in exercise list"
