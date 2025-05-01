@@ -30,7 +30,7 @@ import Data.Foldable (Foldable (elem), any, find, foldMap, foldr, forM_, for_, m
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
 import Data.Int (Int, Int64)
-import Data.List (filter, sortOn, unfoldr, zip)
+import Data.List (filter, length, sortOn, unfoldr, zip)
 import Data.List.NonEmpty qualified as NE
 import Data.List.Split (chunksOf)
 import Data.Map.Strict qualified as Map
@@ -48,7 +48,7 @@ import Data.Traversable (forM)
 import Data.Tuple (fst, snd)
 import Lucid qualified as L
 import Lucid.Base (makeAttributes)
-import Myocardio.DatabaseNew (ExerciseToggleState (ExerciseAdded, ExerciseRemoved), ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), sorenessScalarToInt)
+import Myocardio.DatabaseNew (ExerciseToggleState (ExerciseAdded, ExerciseRemoved), ExerciseWithWorkouts (ExerciseWithWorkouts), ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), sorenessScalarToInt)
 import Myocardio.DatabaseNew qualified as DBN
 import Safe (maximumByMay)
 import Safe.Foldable (minimumMay)
@@ -469,9 +469,9 @@ viewConcreteMuscleGroupExercises currentTime sorenessHistory currentSoreness all
                   L.div_ [L.class_ "row"] do
                     forM_ exerciseRow (L.div_ [L.class_ "col-lg-6 col-12"] . viewSingleExerciseInChooser currentTime muscle exercisesForThisMuscle sorenessHistory currentSoreness)
 
-viewChoose :: [DBN.Muscle] -> [DBN.Soreness] -> [DBN.ExerciseWithWorkouts] -> L.Html ()
+viewChoose :: [Muscle] -> [Soreness] -> [ExerciseWithWorkouts] -> L.Html ()
 viewChoose allMuscles' currentSoreness currentTraining = do
-  let currentMuscleSoreness :: DBN.Muscle -> DBN.SorenessScalar
+  let currentMuscleSoreness :: Muscle -> SorenessScalar
       currentMuscleSoreness muscle =
         fromMaybe NotSore ((\s -> s.soreness) <$> find (\s -> s.muscle == muscle) currentSoreness)
       viewButtonClass muscle'
@@ -481,11 +481,20 @@ viewChoose allMuscles' currentSoreness currentTraining = do
               else "btn btn-danger w-100"
         | currentMuscleSoreness muscle' == NotSore = "btn btn-primary w-100"
         | otherwise = "btn btn-warning w-100"
-      viewButton :: DBN.Muscle -> L.Html ()
+      viewNumberOfExercises :: Muscle -> Text
+      viewNumberOfExercises muscle' =
+        let number = length (filter (\(ExerciseWithWorkouts {muscles}) -> Set.member muscle' muscles) currentTraining)
+         in if number == 0
+              then ""
+              else
+                if number == 1
+                  then " (" <> packShow number <> " ex)"
+                  else " (" <> packShow number <> " exs)"
+      viewButton :: Muscle -> L.Html ()
       viewButton muscle' = do
         L.a_ [L.href_ ("/training/" <> packShow muscle'.id), L.class_ (viewButtonClass muscle')] do
-          L.span_ $ L.toHtml muscle'.name
-      buttonArray :: [[DBN.Muscle]]
+          L.span_ $ L.toHtml (muscle'.name <> viewNumberOfExercises muscle')
+      buttonArray :: [[Muscle]]
       buttonArray = chunksOf 2 allMuscles'
   forM_ buttonArray \buttonList -> do
     L.div_ [L.class_ "row mb-3"] (forM_ buttonList (L.div_ [L.class_ "col-6 text-center"] . viewButton))
