@@ -48,7 +48,7 @@ import Data.Traversable (forM)
 import Data.Tuple (fst, snd)
 import Lucid qualified as L
 import Lucid.Base (makeAttributes)
-import Myocardio.DatabaseNew (ExerciseToggleState (ExerciseAdded, ExerciseRemoved), ExerciseWithWorkouts (ExerciseWithWorkouts), ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), sorenessScalarToInt)
+import Myocardio.DatabaseNew (DeprecationStatus (NotDeprecated), ExerciseDescription, ExerciseToggleState (ExerciseAdded, ExerciseRemoved), ExerciseWithWorkouts (ExerciseWithWorkouts), ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), sorenessScalarToInt)
 import Myocardio.DatabaseNew qualified as DBN
 import Safe (maximumByMay)
 import Safe.Foldable (minimumMay)
@@ -626,11 +626,11 @@ viewExerciseDescriptionHtml e = do
   L.toHtmlRaw $ commonmarkToHtml [] [] e.description
   forM_ e.fileIds viewExerciseImageHtml
 
-viewExerciseListOuter :: [DBN.Muscle] -> [DBN.ExerciseDescription] -> Maybe DBN.ExerciseDescription -> L.Html ()
+viewExerciseListOuter :: [Muscle] -> [ExerciseDescription] -> Maybe ExerciseDescription -> L.Html ()
 viewExerciseListOuter allMuscles exercises editedExercise =
   viewHtmlSkeleton PageExercises $ viewExerciseList allMuscles exercises editedExercise
 
-viewExerciseList :: [DBN.Muscle] -> [DBN.ExerciseDescription] -> Maybe DBN.ExerciseDescription -> L.Html ()
+viewExerciseList :: [Muscle] -> [ExerciseDescription] -> Maybe ExerciseDescription -> L.Html ()
 viewExerciseList allMuscles' exercises existingExercise = do
   L.div_ [makeId idExerciseForm, L.class_ "mb-3"] do
     maybe newExerciseButtonHtml (viewExerciseFormHtml allMuscles') existingExercise
@@ -651,6 +651,21 @@ viewExerciseList allMuscles' exercises existingExercise = do
             L.type_ "submit"
           ]
           (iconHtml' "pencil-square")
+      case exercise'.deprecated of
+        NotDeprecated ->
+          L.form_ [L.action_ ("/deprecate-exercise/" <> packShow exercise'.id)] do
+            L.button_
+              [ L.class_ "btn btn-sm btn-warning me-2",
+                L.type_ "submit"
+              ]
+              (iconHtml' "file-x")
+        _ ->
+          L.form_ [L.action_ ("/undeprecate-exercise/" <> packShow exercise'.id)] do
+            L.button_
+              [ L.class_ "btn btn-sm btn-success me-2",
+                L.type_ "submit"
+              ]
+              (iconHtml' "file-play")
       L.form_ [L.action_ ("/remove-exercise/" <> packShow exercise'.id)] do
         L.button_
           [ L.class_ "btn btn-sm btn-danger me-2",
@@ -658,6 +673,9 @@ viewExerciseList allMuscles' exercises existingExercise = do
           ]
           (iconHtml' "trash-fill")
       L.toHtml exercise'.name
+      case exercise'.deprecated of
+        NotDeprecated -> mempty
+        _ -> L.toHtml (" (deprecated)" :: Text)
     L.div_ [L.class_ "gap-1 mb-3"] do
       forM_ exercise'.muscles \muscle' -> L.span_ [L.class_ "badge text-bg-primary me-1"] (L.toHtml muscle'.name)
     L.div_ [L.class_ "alert alert-light"] (viewExerciseDescriptionHtml exercise')

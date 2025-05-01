@@ -37,35 +37,7 @@ import Data.Time.Format.ISO8601 (iso8601ParseM)
 import Data.Traversable (sequence, traverse)
 import Lucid (renderText)
 import Myocardio.AbsoluteWeek (beginningOfAbsoluteWeeks, getCurrentAbsoluteWeek)
-import Myocardio.DatabaseNew
-  ( ExerciseCommitted (NotCommitted),
-    ExerciseDescription (ExerciseDescription, description, fileIds, id, muscles, name),
-    ExerciseToggleState (ExerciseAdded, ExerciseRemoved),
-    ExerciseWithWorkouts (id, workouts),
-    ExerciseWorkout (intensity, time),
-    IdType,
-    Muscle (id),
-    MuscleWithWorkoutWeek (MuscleWithWorkoutWeek, muscle, week),
-    SorenessScalar (LittleSore, NotSore, VerySore),
-    changeIntensity,
-    commitWorkout,
-    insertExercise,
-    removeExercise,
-    retrieveAllMuscles,
-    retrieveCurrentSoreness,
-    retrieveExercisesDescriptions,
-    retrieveExercisesWithWorkouts,
-    retrieveFile,
-    retrieveLastWorkout,
-    retrieveMusclesTrainedHistory,
-    retrieveMusclesWithDates,
-    retrieveSorenessHistory,
-    retrieveWorkoutsPerWeek,
-    toggleExercise,
-    updateExercise,
-    updateSoreness,
-    withDatabase,
-  )
+import Myocardio.DatabaseNew (DeprecationStatus (Deprecated, NotDeprecated), ExerciseCommitted (NotCommitted), ExerciseDescription (ExerciseDescription, deprecated, description, fileIds, id, muscles, name), ExerciseToggleState (ExerciseAdded, ExerciseRemoved), ExerciseWithWorkouts (id, workouts), ExerciseWorkout (intensity, time), IdType, Muscle (id), MuscleWithWorkoutWeek (MuscleWithWorkoutWeek, muscle, week), SorenessScalar (LittleSore, NotSore, VerySore), changeIntensity, commitWorkout, insertExercise, removeExercise, retrieveAllMuscles, retrieveCurrentSoreness, retrieveExercisesDescriptions, retrieveExercisesWithWorkouts, retrieveFile, retrieveLastWorkout, retrieveMusclesTrainedHistory, retrieveMusclesWithDates, retrieveSorenessHistory, retrieveWorkoutsPerWeek, setDeprecation, toggleExercise, updateExercise, updateSoreness, withDatabase)
 import Myocardio.Statistics (histogramForWorkouts, regressionForWorkouts, viewChartForWorkouts)
 import Network.HTTP.Types.Status (status400)
 import Network.Wai.Middleware.Static (addBase, isNotAbsolute, noDots, staticPolicy)
@@ -132,7 +104,7 @@ finishWithBadRequest message = do
 mainPage :: Bool -> ActionM ()
 mainPage sorenessWasUpdated = withDatabase \connection -> do
   allMuscles' <- retrieveAllMuscles connection
-  exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
+  exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted) Nothing
   currentSoreness <- retrieveCurrentSoreness connection
   lastWorkout <- retrieveLastWorkout connection
   currentTime <- liftIO getCurrentTime
@@ -156,7 +128,7 @@ main = do
             currentTime
             (maybe "" (.intensity) (maximumByMay (comparing (.time)) (Set.elems exerciseWithWorkout.workouts)))
         allMuscles' <- retrieveAllMuscles connection
-        exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
+        exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted) Nothing
         currentSoreness <- retrieveCurrentSoreness connection
         musclesLastWeek <- retrieveMusclesTrainedHistory connection 7
         html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesLastWeek False
@@ -182,7 +154,8 @@ main = do
                               muscles = mempty,
                               description = "",
                               name = "",
-                              fileIds = mempty
+                              fileIds = mempty,
+                              deprecated = NotDeprecated
                             }
                       else Nothing
                   )
@@ -199,7 +172,7 @@ main = do
     get (capture "/training") do
       withDatabase \connection -> do
         allMuscles' <- retrieveAllMuscles connection
-        exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted)
+        exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted) (Just NotDeprecated)
         currentSoreness <- retrieveCurrentSoreness connection
         html $ renderText $ viewChooseOuter allMuscles' currentSoreness exercises
 
@@ -209,7 +182,7 @@ main = do
         muscleId <- pathParam "muscleid"
         toggle <- queryParamMaybe "toggle"
         allMuscles' <- retrieveAllMuscles connection
-        exercises <- retrieveExercisesWithWorkouts connection Nothing
+        exercises <- retrieveExercisesWithWorkouts connection Nothing (Just NotDeprecated)
         sorenessHistory <- retrieveSorenessHistory connection
         currentSoreness <- retrieveCurrentSoreness connection
 
@@ -226,6 +199,18 @@ main = do
         fileId <- pathParam "fileid"
         file' <- retrieveFile connection fileId
         raw file'
+
+    get "/deprecate-exercise/:exercise-id" do
+      exerciseId <- pathParam "exercise-id"
+      withDatabase \connection -> do
+        setDeprecation connection exerciseId Deprecated
+        redirect "/exercises"
+
+    get "/undeprecate-exercise/:exercise-id" do
+      exerciseId <- pathParam "exercise-id"
+      withDatabase \connection -> do
+        setDeprecation connection exerciseId NotDeprecated
+        redirect "/exercises"
 
     get "/remove-exercise/:exercise-id" do
       exerciseId <- pathParam "exercise-id"
