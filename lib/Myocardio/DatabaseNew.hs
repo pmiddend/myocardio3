@@ -10,6 +10,7 @@ module Myocardio.DatabaseNew
     ExerciseDescription (..),
     ExerciseWorkout (..),
     Muscle (..),
+    ExerciseToggleState (..),
     retrieveMusclesWithDates,
     MuscleWithWorkoutWeek (MuscleWithWorkoutWeek, muscle, week),
     Soreness (..),
@@ -48,14 +49,14 @@ where
 
 import Control.Applicative (pure, (<*>))
 import Control.Exception (catch)
-import Control.Monad (mapM_, when)
+import Control.Monad (mapM_)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Data.Bool (Bool (False, True))
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
 import Data.Either (Either (Left, Right))
-import Data.Eq (Eq ((==)))
+import Data.Eq (Eq ((/=), (==)))
 import Data.Foldable (forM_, for_)
 import Data.Function (($), (.))
 import Data.Functor ((<$>))
@@ -520,17 +521,20 @@ updateExercise conn exerciseId muscles name description newFiles deleteOldFiles 
   forM_ newFiles \file ->
     execute conn "INSERT INTO ExerciseHasFile (exercise_id, file_content) VALUES (?, ?)" (exerciseId, file)
 
-toggleExercise :: forall m. (MonadIO m) => Connection -> IdType -> UTCTime -> Text -> m ()
+data ExerciseToggleState = ExerciseAdded | ExerciseRemoved
+
+toggleExercise :: forall m. (MonadIO m) => Connection -> IdType -> UTCTime -> Text -> m ExerciseToggleState
 toggleExercise conn exerciseId currentTime intensity = liftIO do
   execute conn "DELETE FROM ExerciseWithIntensity WHERE exercise_id = ? AND committed = ?" (exerciseId, 0 :: Int)
   numberOfDeletions <- changes conn
-  when
-    (numberOfDeletions == 0)
-    ( execute
+  if numberOfDeletions /= 0
+    then pure ExerciseRemoved
+    else do
+      execute
         conn
         "INSERT INTO ExerciseWithIntensity (exercise_id, intensity, time, committed) VALUES (?, ?, ?, ?)"
         (exerciseId, intensity, currentTime, 0 :: Int)
-    )
+      pure ExerciseAdded
 
 changeIntensity :: forall m. (MonadIO m) => Connection -> IdType -> Text -> m ()
 changeIntensity conn exerciseId intensity = liftIO do
