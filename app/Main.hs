@@ -23,7 +23,7 @@ import Data.Int (Int, Int64)
 import Data.List (filter, replicate, sortOn)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
-import Data.Maybe (Maybe (Just, Nothing), mapMaybe, maybe)
+import Data.Maybe (Maybe (Just, Nothing), fromMaybe, mapMaybe, maybe)
 import Data.Monoid (mempty)
 import Data.Ord (comparing, (>=))
 import Data.Semigroup (Semigroup ((<>)))
@@ -40,6 +40,7 @@ import Myocardio.AbsoluteWeek (beginningOfAbsoluteWeeks, getCurrentAbsoluteWeek)
 import Myocardio.DatabaseNew
   ( ExerciseCommitted (NotCommitted),
     ExerciseDescription (ExerciseDescription, description, fileIds, id, muscles, name),
+    ExerciseToggleState (ExerciseAdded, ExerciseRemoved),
     ExerciseWithWorkouts (id, workouts),
     ExerciseWorkout (intensity, time),
     IdType,
@@ -82,6 +83,11 @@ instance Parsable Day where
     case iso8601ParseM (TL.unpack v) of
       Nothing -> Left ("cannot parse form date parameter " <> v)
       Just day -> Right day
+
+instance Parsable ExerciseToggleState where
+  parseParam "added" = pure ExerciseAdded
+  parseParam "removed" = pure ExerciseRemoved
+  parseParam other = Left ("cannot parse exercise toggle value " <> other)
 
 instance (Parsable a) => Parsable (NE.NonEmpty a) where
   parseParam v =
@@ -201,6 +207,7 @@ main = do
       withDatabase \connection -> do
         currentTime <- liftIO getCurrentTime
         muscleId <- pathParam "muscleid"
+        toggle <- queryParamMaybe "toggle"
         allMuscles' <- retrieveAllMuscles connection
         exercises <- retrieveExercisesWithWorkouts connection Nothing
         sorenessHistory <- retrieveSorenessHistory connection
@@ -212,7 +219,7 @@ main = do
             text ("I couldn't parse the muscle you gave me: " <> packShowLazy muscleId)
             finish
           Just muscle ->
-            html $ renderText $ viewConcreteMuscleGroupExercisesOuter currentTime sorenessHistory currentSoreness exercises muscle
+            html $ renderText $ viewConcreteMuscleGroupExercisesOuter currentTime sorenessHistory currentSoreness exercises muscle toggle
 
     get "/uploaded-files/:fileid" do
       withDatabase \connection -> do
@@ -275,15 +282,14 @@ main = do
 
     post "/toggle-exercise-in-workout" do
       exerciseId <- formParam "exercise-id"
-      intensity' <- formParam "intensity"
+      intensity' <- formParamMaybe "intensity"
+      muscleId <- formParam "muscle-id"
 
       currentTime <- liftIO getCurrentTime
-      withDatabase \conn -> toggleExercise conn exerciseId currentTime intensity'
-      returnToCurrent :: Maybe Bool <- formParamMaybe "return-to-current"
-      redirect case returnToCurrent of
-        Nothing ->
-          TL.fromStrict "/training"
-        Just _ -> "/"
+      exerciseState <- withDatabase \conn -> toggleExercise conn exerciseId currentTime (fromMaybe "" intensity')
+      let stateToString ExerciseAdded = "added"
+          stateToString ExerciseRemoved = "removed"
+      redirect (TL.fromStrict "/training/" <> muscleId <> "?toggle=" <> stateToString exerciseState)
 
     post "/change-intensity" do
       exerciseId <- formParam "exercise-id"

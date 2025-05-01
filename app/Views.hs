@@ -48,7 +48,7 @@ import Data.Traversable (forM)
 import Data.Tuple (fst, snd)
 import Lucid qualified as L
 import Lucid.Base (makeAttributes)
-import Myocardio.DatabaseNew (ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), sorenessScalarToInt)
+import Myocardio.DatabaseNew (ExerciseToggleState (ExerciseAdded, ExerciseRemoved), ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), sorenessScalarToInt)
 import Myocardio.DatabaseNew qualified as DBN
 import Safe (maximumByMay)
 import Safe.Foldable (minimumMay)
@@ -313,7 +313,7 @@ inCurrentTraining currentTraining muscle =
   isJust (find (\ewi -> muscle `Set.member` ewi.muscles) currentTraining)
 
 viewSingleExerciseInChooser :: UTCTime -> Muscle -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> [DBN.Soreness] -> DBN.ExerciseWithWorkouts -> L.Html ()
-viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessHistory currentSoreness exerciseWithWorkouts = do
+viewSingleExerciseInChooser currentTime muscle exercisesForThisMuscle sorenessHistory currentSoreness exerciseWithWorkouts = do
   let lastExecutionOfThisExercise :: Maybe DBN.ExerciseWorkout
       lastExecutionOfThisExercise =
         maximumByMay (comparing (.time)) (Set.toList exerciseWithWorkouts.workouts)
@@ -376,6 +376,11 @@ viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessH
         L.name_ "exercise-id",
         L.value_ (packShow exerciseWithWorkouts.id)
       ]
+    L.input_
+      [ L.type_ "hidden",
+        L.name_ "muscle-id",
+        L.value_ (packShow muscle.id)
+      ]
     L.div_ [L.class_ "mb-3 card"] do
       viewExerciseImageCarousel exerciseWithWorkouts
       L.div_ [L.class_ "card-body"] do
@@ -421,14 +426,14 @@ viewSingleExerciseInChooser currentTime _muscle exercisesForThisMuscle sorenessH
                     iconHtml "journal-plus"
                     L.span_ "Add to workout"
 
-viewConcreteMuscleGroupExercisesOuter :: UTCTime -> [Soreness] -> [Soreness] -> [DBN.ExerciseWithWorkouts] -> Muscle -> L.Html ()
-viewConcreteMuscleGroupExercisesOuter currentTime sorenessHistory currentSoreness allExercises muscle =
+viewConcreteMuscleGroupExercisesOuter :: UTCTime -> [Soreness] -> [Soreness] -> [DBN.ExerciseWithWorkouts] -> Muscle -> Maybe ExerciseToggleState -> L.Html ()
+viewConcreteMuscleGroupExercisesOuter currentTime sorenessHistory currentSoreness allExercises muscle toggle =
   viewHtmlSkeleton
     (PageMuscle muscle)
-    (viewConcreteMuscleGroupExercises currentTime sorenessHistory currentSoreness allExercises muscle)
+    (viewConcreteMuscleGroupExercises currentTime sorenessHistory currentSoreness allExercises muscle toggle)
 
-viewConcreteMuscleGroupExercises :: UTCTime -> [Soreness] -> [Soreness] -> [DBN.ExerciseWithWorkouts] -> DBN.Muscle -> L.Html ()
-viewConcreteMuscleGroupExercises currentTime sorenessHistory currentSoreness allExercises muscle =
+viewConcreteMuscleGroupExercises :: UTCTime -> [Soreness] -> [Soreness] -> [DBN.ExerciseWithWorkouts] -> DBN.Muscle -> Maybe ExerciseToggleState -> L.Html ()
+viewConcreteMuscleGroupExercises currentTime sorenessHistory currentSoreness allExercises muscle toggle =
   case filter (\m -> muscle `Set.member` m.muscles) allExercises of
     [] -> mempty
     exercisesForThisMuscle ->
@@ -448,6 +453,10 @@ viewConcreteMuscleGroupExercises currentTime sorenessHistory currentSoreness all
                     L.toHtml $ "Last training: " <> dayDiffText currentTime workoutTime <> ": "
                     L.strong_ $ L.toHtml $ packShow exerciseName
        in do
+            case toggle of
+              Nothing -> mempty
+              Just ExerciseAdded -> L.span_ [L.class_ "badge text-bg-success me-1"] "Exercise added!"
+              Just ExerciseRemoved -> L.span_ [L.class_ "badge text-bg-secondary me-1"] "Exercise removed!"
             L.h2_
               [ L.id_ ("training-section-" <> htmlIdFromText (packShow muscle.id)),
                 L.class_ "mt-3"
