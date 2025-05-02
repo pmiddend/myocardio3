@@ -132,6 +132,11 @@ viewHtmlSkeleton page content = do
       L.div_ [L.class_ "container"] do
         L.main_ do
           content
+      L.footer_ do
+        L.div_ [L.class_ "container text-center"] do
+          L.hr_ mempty
+          L.p_ do
+            L.em_ "myocardio3 - by pmiddend"
       -- Not sure if we need the bootstrap JS, and it must save some bandwidth, so leave it out maybe
       L.script_ [L.src_ "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"] ("" :: Text)
 
