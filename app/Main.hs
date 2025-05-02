@@ -23,9 +23,9 @@ import Data.Int (Int, Int64)
 import Data.List (filter, replicate, sortOn)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
-import Data.Maybe (Maybe (Just, Nothing), fromMaybe, mapMaybe, maybe)
+import Data.Maybe (Maybe (Just, Nothing), fromMaybe, mapMaybe)
 import Data.Monoid (mempty)
-import Data.Ord (comparing, (>=))
+import Data.Ord ((>=))
 import Data.Semigroup (Semigroup ((<>)))
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -37,12 +37,11 @@ import Data.Time.Format.ISO8601 (iso8601ParseM)
 import Data.Traversable (sequence, traverse)
 import Lucid (renderText)
 import Myocardio.AbsoluteWeek (beginningOfAbsoluteWeeks, getCurrentAbsoluteWeek)
-import Myocardio.DatabaseNew (DeprecationStatus (Deprecated, NotDeprecated), ExerciseCommitted (NotCommitted), ExerciseDescription (ExerciseDescription, deprecated, description, fileIds, id, muscles, name), ExerciseToggleState (ExerciseAdded, ExerciseRemoved), ExerciseWithWorkouts (id, workouts), ExerciseWorkout (intensity, time), IdType, Muscle (id), MuscleWithWorkoutWeek (MuscleWithWorkoutWeek, muscle, week), SorenessScalar (LittleSore, NotSore, VerySore), changeIntensity, commitWorkout, insertExercise, removeExercise, retrieveAllMuscles, retrieveCurrentSoreness, retrieveExercisesDescriptions, retrieveExercisesWithWorkouts, retrieveFile, retrieveLastWorkout, retrieveMusclesTrainedHistory, retrieveMusclesWithDates, retrieveSorenessHistory, retrieveWorkoutsPerWeek, setDeprecation, toggleExercise, updateExercise, updateSoreness, withDatabase)
+import Myocardio.DatabaseNew (DeprecationStatus (Deprecated, NotDeprecated), ExerciseCommitted (NotCommitted), ExerciseDescription (ExerciseDescription, deprecated, description, fileIds, id, muscles, name), ExerciseInWorkout (exerciseId, intensity), ExerciseToggleState (ExerciseAdded, ExerciseRemoved), IdType, Muscle (id), MuscleWithWorkoutWeek (MuscleWithWorkoutWeek, muscle, week), SorenessScalar (LittleSore, NotSore, VerySore), Workout (day, exercises), changeIntensity, commitWorkout, insertExercise, removeExercise, retrieveAllMuscles, retrieveCurrentSoreness, retrieveExercisesDescriptions, retrieveExercisesWithWorkouts, retrieveFile, retrieveLastWorkout, retrieveMusclesTrainedHistory, retrieveMusclesWithDates, retrieveSorenessHistory, retrieveWorkoutHistory, retrieveWorkoutsPerWeek, setDeprecation, toggleExercise, updateExercise, updateSoreness, withDatabase)
 import Myocardio.Statistics (histogramForWorkouts, regressionForWorkouts, viewChartForWorkouts)
 import Network.HTTP.Types.Status (status400)
 import Network.Wai.Middleware.Static (addBase, isNotAbsolute, noDots, staticPolicy)
 import Network.Wai.Parse (FileInfo (fileContent, fileName))
-import Safe.Foldable (maximumByMay)
 import System.IO (FilePath, IO)
 import Util (packShowLazy)
 import Views (exerciseFormDescriptionParam, exerciseFormFilesToDeleteParam, exerciseFormMusclesParam, exerciseFormNameParam, muscleIdForMuscleSorenessFromHtml, viewChooseOuter, viewConcreteMuscleGroupExercisesOuter, viewExerciseDeletion, viewExerciseListOuter, viewPageCurrentHtml, viewStats)
@@ -109,7 +108,8 @@ mainPage sorenessWasUpdated = withDatabase \connection -> do
   lastWorkout <- retrieveLastWorkout connection
   currentTime <- liftIO getCurrentTime
   musclesLastWeek <- retrieveMusclesTrainedHistory connection 7
-  html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesLastWeek sorenessWasUpdated
+  workoutHistory <- retrieveWorkoutHistory connection 21
+  html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesLastWeek sorenessWasUpdated workoutHistory
 
 main :: IO ()
 main = do
@@ -117,21 +117,20 @@ main = do
     get "/" do
       mainPage False
 
-    get "/repeat-last" do
+    get "/repeat/:day" do
+      day <- pathParam "day"
       withDatabase \connection -> do
-        lastWorkout <- retrieveLastWorkout connection
+        workoutHistory <- retrieveWorkoutHistory connection 21
+        let workoutOnDay = filter (\wo -> wo.day == day) workoutHistory
         currentTime <- liftIO getCurrentTime
-        forM_ lastWorkout \exerciseWithWorkout -> do
-          toggleExercise
-            connection
-            exerciseWithWorkout.id
-            currentTime
-            (maybe "" (.intensity) (maximumByMay (comparing (.time)) (Set.elems exerciseWithWorkout.workouts)))
-        allMuscles' <- retrieveAllMuscles connection
-        exercises <- retrieveExercisesWithWorkouts connection (Just NotCommitted) Nothing
-        currentSoreness <- retrieveCurrentSoreness connection
-        musclesLastWeek <- retrieveMusclesTrainedHistory connection 7
-        html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesLastWeek False
+        forM_ workoutOnDay \workout -> do
+          forM_ workout.exercises \exerciseInWorkout ->
+            toggleExercise
+              connection
+              exerciseInWorkout.exerciseId
+              currentTime
+              exerciseInWorkout.intensity
+        redirect "/"
 
     get "/exercises" do
       withDatabase \connection -> do

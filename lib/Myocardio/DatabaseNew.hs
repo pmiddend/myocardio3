@@ -19,15 +19,11 @@ module Myocardio.DatabaseNew
     IdType,
     SorenessScalar (..),
     DeprecationStatus (..),
+    ExerciseInWorkout (..),
+    Workout (..),
     retrieveMusclesWithDates,
-    sorenessScalarToInt,
-    setDeprecation,
-    withDatabase,
-    retrieveFile,
-    migrateDatabase,
-    openDatabase,
-    closeDatabase,
     retrieveAllMuscles,
+    retrieveWorkoutHistory,
     retrieveLastWorkout,
     retrieveMusclesTrainedHistory,
     retrieveExercisesWithWorkouts,
@@ -36,6 +32,13 @@ module Myocardio.DatabaseNew
     retrieveSorenessHistory,
     retrieveMusclesWithLastWorkoutTime,
     retrieveWorkoutsPerWeek,
+    retrieveFile,
+    sorenessScalarToInt,
+    setDeprecation,
+    withDatabase,
+    migrateDatabase,
+    openDatabase,
+    closeDatabase,
     insertMuscle,
     insertExercise,
     updateExercise,
@@ -65,6 +68,7 @@ import Data.Functor ((<$>))
 import Data.IORef (newIORef, readIORef)
 import Data.Int (Int, Int64)
 import Data.List (head)
+import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
 import Data.Maybe (Maybe (Just, Nothing), fromMaybe, listToMaybe)
 import Data.Monoid (mempty)
@@ -420,7 +424,39 @@ processExercisesWithWorkouts results = do
         <$> Set.toList exerciseData
     )
 
-retrieveExercisesWithWorkouts :: forall m. (MonadIO m) => Connection -> Maybe ExerciseCommitted -> Maybe DeprecationStatus -> m [ExerciseWithWorkouts]
+data ExerciseInWorkout = ExerciseInWorkout
+  { exerciseId :: IdType,
+    exerciseName :: Text,
+    intensity :: Text
+  }
+
+data Workout = Workout
+  { day :: Day,
+    exercises :: NE.NonEmpty ExerciseInWorkout
+  }
+
+fst4 :: (a, b, c, d) -> a
+fst4 (a, _, _, _) = a
+
+retrieveWorkoutHistory ::
+  forall m.
+  (MonadIO m) =>
+  Connection ->
+  Int ->
+  m [Workout]
+retrieveWorkoutHistory conn days = do
+  results :: [(Day, IdType, Text, Text)] <- liftIO $ query_ conn $ fromString $ "SELECT date(WI.time), E.id, E.name, WI.intensity FROM ExerciseWithIntensity WI INNER JOIN Exercise E ON E.id == WI.exercise_id WHERE WI.committed = 1 AND date(WI.time) < date('now') AND date(WI.time) > date('now', '-" <> show days <> " day') ORDER BY wi.time DESC"
+  let convertGroup :: NE.NonEmpty (Day, IdType, Text, Text) -> Workout
+      convertGroup items = Workout {day = fst4 (NE.head items), exercises = (\(_, exerciseId, exerciseName, intensity) -> ExerciseInWorkout {exerciseId, exerciseName, intensity}) <$> items}
+  pure (convertGroup <$> NE.groupBy (\(day, _, _, _) (day', _, _, _) -> day == day') results)
+
+retrieveExercisesWithWorkouts ::
+  forall m.
+  (MonadIO m) =>
+  Connection ->
+  Maybe ExerciseCommitted ->
+  Maybe DeprecationStatus ->
+  m [ExerciseWithWorkouts]
 retrieveExercisesWithWorkouts conn committedFilterMaybe deprecationStatus = liftIO $ do
   let finalStatement :: IO [(IdType, Text, Text, Maybe IdType, Maybe Text, Maybe IdType, Maybe Text, Maybe UTCTime, Maybe Int)]
       finalStatement =

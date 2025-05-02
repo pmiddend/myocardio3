@@ -42,13 +42,14 @@ import Data.Set qualified as Set
 import Data.String (IsString)
 import Data.Text (Text, breakOnEnd, intercalate, pack, replace)
 import Data.Text.Read (decimal)
+import Data.Time.Calendar (Day)
 import Data.Time.Clock (UTCTime (utctDay, utctDayTime), diffUTCTime, nominalDay)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Traversable (forM)
 import Data.Tuple (fst, snd)
 import Lucid qualified as L
 import Lucid.Base (makeAttributes)
-import Myocardio.DatabaseNew (DeprecationStatus (NotDeprecated), ExerciseDescription, ExerciseToggleState (ExerciseAdded, ExerciseRemoved), ExerciseWithWorkouts (ExerciseWithWorkouts), ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), sorenessScalarToInt)
+import Myocardio.DatabaseNew (DeprecationStatus (NotDeprecated), ExerciseDescription, ExerciseToggleState (ExerciseAdded, ExerciseRemoved), ExerciseWithWorkouts (ExerciseWithWorkouts), ExerciseWorkout (ExerciseWorkout), IdType, Muscle, Soreness, SorenessScalar (LittleSore, NotSore, VerySore), Workout (day, exercises), sorenessScalarToInt)
 import Myocardio.DatabaseNew qualified as DBN
 import Safe (maximumByMay)
 import Safe.Foldable (minimumMay)
@@ -688,11 +689,12 @@ viewExerciseList allMuscles' exercises existingExercise = do
       forM_ exercise'.muscles \muscle' -> L.span_ [L.class_ "badge text-bg-primary me-1"] (L.toHtml muscle'.name)
     L.div_ [L.class_ "alert alert-light"] (viewExerciseDescriptionHtml exercise')
 
-viewPageCurrentHtml :: UTCTime -> [DBN.Muscle] -> [DBN.ExerciseWithWorkouts] -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> [DBN.Muscle] -> Bool -> L.Html ()
-viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesTrainedHistory sorenessWasUpdated = viewHtmlSkeleton PageCurrent $ do
+viewPageCurrentHtml :: UTCTime -> [Muscle] -> [ExerciseWithWorkouts] -> [ExerciseWithWorkouts] -> [Soreness] -> [Muscle] -> Bool -> [Workout] -> L.Html ()
+viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesTrainedHistory sorenessWasUpdated workoutHistory = viewHtmlSkeleton PageCurrent $ do
   viewCurrentWorkout allMuscles' exercises
   L.hr_ [L.class_ "mb-3"]
   viewLastWorkout currentTime lastWorkout currentSoreness musclesTrainedHistory sorenessWasUpdated
+  viewWorkoutHistory workoutHistory
 
 htmlIdForMuscleSoreness :: Muscle -> Text
 htmlIdForMuscleSoreness muscle = "how-sore" <> packShow muscle.id
@@ -758,7 +760,27 @@ viewSorenessForm musclesInvolved historical currentSoreness = do
             L.span_ [L.class_ "text-muted me-1"] "Historical: "
         forM_ (sortOn (.name) (Set.toList historical)) makeRow
 
-viewLastWorkout :: UTCTime -> [DBN.ExerciseWithWorkouts] -> [DBN.Soreness] -> [DBN.Muscle] -> Bool -> L.Html ()
+viewWorkoutHistory :: [Workout] -> L.Html ()
+viewWorkoutHistory workouts = do
+  L.h5_ "Past workouts"
+  forM_ (chunksOf 2 workouts) \workoutRow -> do
+    L.div_ [L.class_ "row mb-3"] do
+      forM_ workoutRow \workout -> do
+        L.div_ [L.class_ "col-lg-6 col-12 mt-3"] do
+          L.span_ (L.toHtml (packShow workout.day))
+          L.ul_ [L.class_ "mb-0"] do
+            forM_ workout.exercises \exercise' ->
+              L.li_ do
+                L.toHtml (exercise'.exerciseName <> " ")
+                L.small_ [L.class_ "form-text"] do
+                  L.toHtml exercise'.intensity
+
+          L.form_ [L.action_ ("/repeat/" <> packShow (workout.day :: Day))] do
+            L.button_ [L.class_ "btn btn-primary"] do
+              iconHtml "arrow-clockwise"
+              L.toHtml ("Repeat" :: Text)
+
+viewLastWorkout :: UTCTime -> [ExerciseWithWorkouts] -> [Soreness] -> [Muscle] -> Bool -> L.Html ()
 viewLastWorkout _ [] _ _ _ = mempty
 viewLastWorkout currentTime exercises@(e : _) currentSoreness musclesTrainedHistory sorenessWasUpdated = case Set.elems e.workouts of
   [] -> mempty
@@ -778,13 +800,6 @@ viewLastWorkout currentTime exercises@(e : _) currentSoreness musclesTrainedHist
 
         when sorenessWasUpdated do
           L.div_ [L.class_ "badge text-bg-success"] "Soreness updated!"
-
-      L.div_ [L.class_ "gap-1 mb-3"] do
-        L.span_ [L.class_ "text-muted me-1"] "Exercises: "
-        L.ul_ do
-          forM_ exercises \exercise' -> L.li_ (L.toHtml exercise'.name)
-    L.form_ [L.action_ "/repeat-last"] do
-      L.button_ [L.class_ "btn btn-primary"] "♻️ Repeat this workout"
 
 viewChooseOuter :: [DBN.Muscle] -> [DBN.Soreness] -> [DBN.ExerciseWithWorkouts] -> L.Html ()
 viewChooseOuter allMuscles' currentSoreness currentTraining =
