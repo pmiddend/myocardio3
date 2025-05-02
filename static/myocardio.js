@@ -5,9 +5,7 @@ function reset_intensity(prefix) {
     if (position_of_colon !== -1) {
 	input_element.value = previous_text.substring(0, position_of_colon) + ": ";
     } else {
-	if (input_element_value.length > 0) {
-	    input_element.value = previous_text + ": ";
-	}
+	input_element.value = "";
     }
 }
 
