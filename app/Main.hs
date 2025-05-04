@@ -267,13 +267,15 @@ main = do
     post "/toggle-exercise-in-workout" do
       exerciseId <- formParam "exercise-id"
       intensity' <- formParamMaybe "intensity"
-      muscleId <- formParam "muscle-id"
+      muscleId <- formParamMaybe "muscle-id"
 
       currentTime <- liftIO getCurrentTime
       exerciseState <- withDatabase \conn -> toggleExercise conn exerciseId currentTime (fromMaybe "" intensity')
       let stateToString ExerciseAdded = "added"
           stateToString ExerciseRemoved = "removed"
-      redirect (TL.fromStrict "/training/" <> muscleId <> "?toggle=" <> stateToString exerciseState)
+      case muscleId of
+        Just muscleId' -> redirect (TL.fromStrict "/training/" <> muscleId' <> "?toggle=" <> stateToString exerciseState)
+        Nothing -> redirect "/"
 
     post "/change-intensity" do
       exerciseId <- formParam "exercise-id"
