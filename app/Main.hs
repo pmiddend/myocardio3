@@ -108,7 +108,7 @@ mainPage sorenessWasUpdated = withDatabase \connection -> do
   lastWorkout <- retrieveLastWorkout connection
   currentTime <- liftIO getCurrentTime
   musclesLastWeek <- retrieveMusclesTrainedHistory connection 7
-  workoutHistory <- retrieveWorkoutHistory connection 21
+  workoutHistory <- retrieveWorkoutHistory connection 42
   html $ renderText $ viewPageCurrentHtml currentTime allMuscles' exercises lastWorkout currentSoreness musclesLastWeek sorenessWasUpdated workoutHistory
 
 main :: IO ()
@@ -120,7 +120,7 @@ main = do
     get "/repeat/:day" do
       day <- pathParam "day"
       withDatabase \connection -> do
-        workoutHistory <- retrieveWorkoutHistory connection 21
+        workoutHistory <- retrieveWorkoutHistory connection 42
         let workoutOnDay = filter (\wo -> wo.day == day) workoutHistory
         currentTime <- liftIO getCurrentTime
         forM_ workoutOnDay \workout -> do
