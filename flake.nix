@@ -6,7 +6,7 @@
   description = "myocardio";
 
   inputs = {
-    nixpkgs.url = "nixpkgs/nixos-24.11";
+    nixpkgs.url = "nixpkgs/nixos-25.05";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -23,16 +23,14 @@
           haskellPackages = pkgs.haskellPackages.override
             {
               overrides = self: super: {
-                myocardio = self.callCabal2nix packageName ./.
-                  {
-                    scotty = haskellPackages.scotty_0_22;
-                  };
+                myocardio = self.callCabal2nix packageName ./. { };
                 # latest version not broken anymore
                 monoidmap = (self.callHackageDirect
                   {
                     pkg = "monoidmap";
                     ver = "0.0.2.1";
                     sha256 = "sha256-p92JdsvKHMETnlTxuB5bi2HFzkdfr2lRMOjmOtTT/rY=";
+
                   }
                   { });
               };
@@ -41,7 +39,7 @@
         in
         {
           packages.${packageName} =
-            haskellPackages.myocardio.overrideAttrs (final: prev: {
+            pkgs.haskell.lib.justStaticExecutables (haskellPackages.myocardio.overrideAttrs (final: prev: {
               postPatch = ''
                 sed -i -e 's#staticBasePath = .*#staticBasePath = "${placeholder "out"}/static"#' app/Main.hs
                 sed -i -e 's#svgBasePath = .*#svgBasePath = "${placeholder "out"}/svgs"#' app/Main.hs
@@ -52,7 +50,7 @@
                 mkdir -p $out/static
                 cp static/* $out/static
               '';
-            });
+            }));
 
           packages.default = self.packages.${system}.${packageName};
 

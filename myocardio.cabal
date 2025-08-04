@@ -1,6 +1,6 @@
 cabal-version:  2.2
 name:           myocardio
-version:        3.1.0
+version:        3.2.0
 description:    Please see the README on GitHub at <https://github.com/pmiddend/myocardio#readme>
 homepage:       https://github.com/pmiddend/myocardio#readme
 bug-reports:    https://github.com/pmiddend/myocardio/issues
@@ -34,7 +34,7 @@ library
                  , Myocardio.MapUtils
                  , Myocardio.Statistics
                  , Myocardio.AbsoluteWeek
-  build-depends:    base ^>=4.18.2.1
+  build-depends:    base
                   , aeson
                   , text
                   , time
@@ -62,7 +62,7 @@ executable myocardio-exe
   hs-source-dirs: app
   default-language: GHC2021
   build-depends:
-      base >=4.7 && <5
+      base
     , myocardio
     , text
     , time
@@ -85,7 +85,7 @@ test-suite myocardio-tests
   main-is:          Main.hs
 
   build-depends:
-    base ^>=4.18.2.1,
+    base,
     myocardio,
     tasty,
     tasty-hunit,
