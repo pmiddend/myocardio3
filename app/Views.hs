@@ -128,7 +128,6 @@ viewHtmlSkeleton page content = do
       L.link_ [L.href_ "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css", L.rel_ "stylesheet"]
       L.link_ [L.href_ "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css", L.rel_ "stylesheet"]
     L.body_ $ do
-      L.script_ [L.src_ "/myocardio.js"] ("" :: Text)
       viewHeader page
       L.div_ [L.class_ "container"] do
         L.main_ do
