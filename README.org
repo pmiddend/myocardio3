@@ -1,6 +1,6 @@
 * myocardio3 – plan your workouts, track your aches
 
-**This project has moved to [Codeberg](https://codeberg.org/pmiddend/myocardio3)**
+*This project has moved to* https://codeberg.org/pmiddend/myocardio3
 
 [[https://github.com/pmiddend/myocardio/actions/workflows/build-with-cabal.yaml][file:https://github.com/pmiddend/myocardio3/actions/workflows/build-with-cabal.yaml/badge.svg]]
 [[https://github.com/pmiddend/myocardio/actions/workflows/build-with-nix.yaml][file:https://github.com/pmiddend/myocardio3/actions/workflows/build-with-nix.yaml/badge.svg]]
